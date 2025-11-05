@@ -1,1 +1,0 @@
-var json__80 = {"type":"FeatureCollection","name":"_80","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:OGC:1.3:CRS84"}},"features":[{"type":"Feature","properties":{"Image":"<img src='График геологических событий Миоцен-Плиоценовой ГАУС.png'  height=400 width=1000>"},"geometry":{"type":"Point","coordinates":[52.866468447637423,37.680804699871864]}}]}
