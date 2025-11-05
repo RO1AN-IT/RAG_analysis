@@ -1,0 +1,1 @@
+var json__10 = {"type":"FeatureCollection","name":"_10","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:OGC:1.3:CRS84"}},"features":[{"type":"Feature","properties":{"id":"1","Танке":"Генерал Шихлинский","Год":"2002"},"geometry":{"type":"Point","coordinates":[50.373661634988942,43.646925513142712]}}]}

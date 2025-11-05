@@ -1,0 +1,1 @@
+var json__143 = {"type":"FeatureCollection","name":"_143","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:OGC:1.3:CRS84"}},"features":[{"type":"Feature","properties":{"Площа":"LAM","№скв":"1","Глуби":"3600-4000","Литол":"Глины","Источ":"Hinds et al., 2004г."},"geometry":{"type":"Point","coordinates":[52.918109157973738,39.391440415558144]}}]}

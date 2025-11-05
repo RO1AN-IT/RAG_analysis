@@ -1,0 +1,1 @@
+var json__9 = {"type":"FeatureCollection","name":"_9","crs":{"type":"name","properties":{"name":"urn:ogc:def:crs:OGC:1.3:CRS84"}},"features":[{"type":"Feature","properties":{"id":"1","Платф":"Азери-Чираг-Гюнешли"},"geometry":{"type":"Point","coordinates":[50.851562677715698,40.206171692737101]}}]}
