@@ -199,6 +199,187 @@ class OpenSearchManager:
         
         logger.info(f"Индексация завершена: {processed}/{total_rows} строк")
         return True
+    
+    def get_index_stats(self, index_name: str) -> Dict[str, Any]:
+        """
+        Получение статистики по индексу.
+        
+        Args:
+            index_name: Имя индекса
+            
+        Returns:
+            Словарь со статистикой
+        """
+        try:
+            stats = self.client.indices.stats(index=index_name)
+            return {
+                "doc_count": stats["indices"][index_name]["total"]["docs"]["count"],
+                "size": stats["indices"][index_name]["total"]["store"]["size_in_bytes"],
+                "index_name": index_name
+            }
+        except Exception as e:
+            logger.error(f"Ошибка получения статистики: {e}")
+            return {}
+    
+    def list_indices(self) -> List[str]:
+        """
+        Получение списка всех индексов.
+        
+        Returns:
+            Список имен индексов
+        """
+        try:
+            indices = self.client.indices.get_alias("*")
+            return list(indices.keys())
+        except Exception as e:
+            logger.error(f"Ошибка получения списка индексов: {e}")
+            return []
+    
+    def get_documents(
+        self,
+        index_name: str,
+        size: int = 10,
+        from_: int = 0,
+        fields: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Получение документов из индекса.
+        
+        Args:
+            index_name: Имя индекса
+            size: Количество документов
+            from_: Смещение (для пагинации)
+            fields: Список полей для возврата (None = все поля)
+            
+        Returns:
+            Список документов
+        """
+        try:
+            query = {
+                "match_all": {}
+            }
+            
+            body = {
+                "query": query,
+                "size": size,
+                "from": from_
+            }
+            
+            if fields:
+                body["_source"] = fields
+            
+            response = self.client.search(index=index_name, body=body)
+            
+            documents = []
+            for hit in response["hits"]["hits"]:
+                doc = {
+                    "_id": hit["_id"],
+                    "_score": hit.get("_score"),
+                    "_source": hit["_source"]
+                }
+                documents.append(doc)
+            
+            return documents
+        except Exception as e:
+            logger.error(f"Ошибка получения документов: {e}")
+            return []
+    
+    def get_sample_documents(self, index_name: str, count: int = 5) -> None:
+        """
+        Вывод примеров документов из индекса.
+        
+        Args:
+            index_name: Имя индекса
+            count: Количество примеров
+        """
+        print(f"\n{'='*80}")
+        print(f"Примеры документов из индекса '{index_name}' (первые {count}):")
+        print('='*80)
+        
+        docs = self.get_documents(index_name, size=count)
+        
+        if not docs:
+            print("Документы не найдены или индекс пуст")
+            return
+        
+        for i, doc in enumerate(docs, 1):
+            print(f"\n--- Документ {i} (ID: {doc['_id']}) ---")
+            source = doc["_source"]
+            
+            # Выводим основные поля
+            if "text" in source:
+                text_preview = source["text"][:200] + "..." if len(source["text"]) > 200 else source["text"]
+                print(f"Текст: {text_preview}")
+            
+            # Выводим числовые поля
+            for field in ["Corg", "R0", "depth"]:
+                if field in source:
+                    print(f"{field}: {source[field]}")
+            
+            # Выводим строковые поля
+            for field in ["region", "layer_name", "source_file"]:
+                if field in source:
+                    print(f"{field}: {source[field]}")
+            
+            # Выводим location если есть
+            if "location" in source:
+                print(f"location: {source['location']}")
+            
+            print()
+    
+    def get_index_mapping(self, index_name: str) -> Dict[str, Any]:
+        """
+        Получение маппинга индекса.
+        
+        Args:
+            index_name: Имя индекса
+            
+        Returns:
+            Маппинг индекса
+        """
+        try:
+            mapping = self.client.indices.get_mapping(index=index_name)
+            return mapping[index_name]["mappings"]
+        except Exception as e:
+            logger.error(f"Ошибка получения маппинга: {e}")
+            return {}
+    
+    def print_index_info(self, index_name: str) -> None:
+        """
+        Вывод полной информации об индексе.
+        
+        Args:
+            index_name: Имя индекса
+        """
+        print(f"\n{'='*80}")
+        print(f"Информация об индексе: {index_name}")
+        print('='*80)
+        
+        # Проверка существования
+        if not self.client.indices.exists(index=index_name):
+            print(f"Индекс '{index_name}' не существует")
+            return
+        
+        # Статистика
+        stats = self.get_index_stats(index_name)
+        if stats:
+            print(f"\nСтатистика:")
+            print(f"  Количество документов: {stats.get('doc_count', 0)}")
+            print(f"  Размер: {stats.get('size', 0) / 1024 / 1024:.2f} MB")
+        
+        # Маппинг
+        mapping = self.get_index_mapping(index_name)
+        if mapping:
+            print(f"\nПоля индекса:")
+            properties = mapping.get("properties", {})
+            for field_name, field_type in properties.items():
+                field_info = field_type.get("type", "unknown")
+                if "dimension" in field_type:
+                    field_info += f" (dimension: {field_type['dimension']})"
+                print(f"  - {field_name}: {field_info}")
+        
+        # Примеры документов
+        self.get_sample_documents(index_name, count=3)
 
 
 if __name__ == "__main__":
@@ -233,11 +414,40 @@ if __name__ == "__main__":
     else:
         logger.warning(f"Файл {csv_path} не найден. Проверьте путь к файлу.")
 
-    # Использование GigaChat напрямую (без LangChain обертки)
-    # GigaChat нужно использовать в контекстном менеджере
-    with GigaChat(
-        credentials=GIGACHAT_CREDENTIALS,
-        verify_ssl_certs=False
-    ) as giga:
-        response = giga.chat("Hello, world!")
-        print(response.choices[0].message.content)
+    # Просмотр данных в OpenSearch
+    # Список всех индексов
+    print("\n" + "="*80)
+    print("СПИСОК ИНДЕКСОВ В OPENSEARCH:")
+    print("="*80)
+    indices = manager.list_indices()
+    if indices:
+        for idx in indices:
+            print(f"  - {idx}")
+    else:
+        print("  Индексы не найдены")
+    
+    # Информация об индексе
+    if manager.client.indices.exists(index=index_name):
+        manager.print_index_info(index_name)
+    else:
+        print(f"\nИндекс '{index_name}' не существует")
+    
+    # Получение большего количества документов
+    print(f"\n{'='*80}")
+    print(f"ПОЛУЧЕНИЕ ДОКУМЕНТОВ ИЗ ИНДЕКСА '{index_name}'")
+    print('='*80)
+    docs = manager.get_documents(index_name, size=10)
+    print(f"\nНайдено документов: {len(docs)}")
+    
+    if docs:
+        print(f"\nПервые {min(5, len(docs))} документов:")
+        for i, doc in enumerate(docs[:5], 1):
+            print(f"\n{i}. ID: {doc['_id']}")
+            source = doc.get('_source', {})
+            # Показываем только ключевые поля
+            for key in ['text', 'Corg', 'R0', 'depth', 'region', 'layer_name']:
+                if key in source:
+                    value = source[key]
+                    if key == 'text' and isinstance(value, str) and len(value) > 100:
+                        value = value[:100] + "..."
+                    print(f"   {key}: {value}")

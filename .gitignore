@@ -1,1 +1,25 @@
 ЦК(25.06.25)/
+
+# Конфигурационные файлы с секретами
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Данные
+*.csv
+*.json
+parsed_*.json
+pars_*.csv

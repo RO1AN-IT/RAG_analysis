@@ -1,0 +1,27 @@
+# Основные зависимости для RAG системы с OpenSearch
+
+# OpenSearch
+opensearch-py>=2.0.0
+
+# Эмбеддинги
+sentence-transformers>=2.2.0
+
+# LangChain (опционально, для RAG функций)
+langchain>=0.1.0
+langchain-openai>=0.1.0
+langchain-community>=0.0.20
+
+# Обработка данных
+pandas>=1.5.0
+numpy>=1.23.0
+
+# Геопространственные данные
+shapely>=2.0.0
+
+# QGIS (для работы с GIS данными)
+# Устанавливается отдельно через conda или систему пакетов
+# conda install -c conda-forge qgis pyqgis
+
+# Дополнительные зависимости
+xgboost>=2.0.0
+
