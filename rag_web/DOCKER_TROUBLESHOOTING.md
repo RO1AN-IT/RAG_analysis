@@ -225,14 +225,14 @@ docker-compose logs backend
 docker-compose logs --tail=100 backend
 ```
 
-### 2. Если `deploy.resources` не работает
+### 2. Если `deploy.resources` не работает (ОБЯЗАТЕЛЬНО для обычного Docker Compose)
 
-Если `deploy` не работает (часто на старых версиях Docker Compose без Swarm), используйте альтернативный вариант:
+**ВАЖНО:** `deploy` работает ТОЛЬКО в Docker Swarm mode. Для обычного Docker Compose используйте `mem_limit`.
 
 **Замените в `docker-compose.yml`:**
 
 ```yaml
-# УДАЛИТЬ это:
+# УДАЛИТЬ это (не работает без Swarm):
 deploy:
   resources:
     limits:
@@ -240,9 +240,22 @@ deploy:
     reservations:
       memory: 1G
 
-# ДОБАВИТЬ это (альтернатива для старых версий):
+# ДОБАВИТЬ это (работает всегда):
 mem_limit: 4g
 mem_reservation: 1g
+```
+
+Также убедитесь, что `depends_on` не использует `condition: service_healthy` (это тоже требует Swarm):
+
+```yaml
+# Заменить:
+depends_on:
+  backend:
+    condition: service_healthy
+
+# На:
+depends_on:
+  - backend
 ```
 
 Затем:

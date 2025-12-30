@@ -9,16 +9,8 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    # Для Docker Compose 3.x+ с Swarm (если не работает, используйте mem_limit ниже)
-    deploy:
-      resources:
-        limits:
-          memory: 4G  # 4GB из 8GB для backend (1 ядро, 8GB RAM)
-        reservations:
-          memory: 1G  # Минимальная гарантированная память
-    # Альтернатива для старых версий (раскомментируйте, если deploy не работает):
-    # mem_limit: 4g
-    # mem_reservation: 1g
+    # Ограничение памяти: для Docker Compose без Swarm используйте настройки Docker daemon
+    # или уберите эту секцию, если ограничение не критично
     volumes:
       - backend_static:/app/staticfiles
       # Монтируем файлы из корня проекта (если они там лежат)
@@ -52,8 +44,7 @@ services:
     ports:
       - "80:80"
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
     networks:
       - rag_network
 
