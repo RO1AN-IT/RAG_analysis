@@ -1,5 +1,38 @@
 # Устранение неполадок Docker Compose
 
+## Проблема: 504 Gateway Timeout (upstream timed out)
+
+Если в логах frontend видите:
+```
+upstream timed out (110: Operation timed out) while reading response header from upstream
+```
+
+Это означает, что backend обрабатывает запрос слишком долго и nginx разрывает соединение.
+
+### Решение:
+
+1. **Увеличены таймауты в `docker/nginx.conf`** (уже сделано)
+2. **Проверить логи backend** для понимания, что происходит:
+   ```bash
+   docker-compose logs backend | tail -100
+   ```
+3. **Проверить, что backend обрабатывает запросы:**
+   ```bash
+   # Проверить процессы в backend контейнере
+   docker-compose exec backend ps aux | grep gunicorn
+   
+   # Проверить использование CPU/памяти
+   docker stats rag_web_backend
+   ```
+4. **Если backend завис или перегружен:**
+   ```bash
+   # Перезапустить backend
+   docker-compose restart backend
+   ```
+5. **Проверить, сколько времени занимает обработка:**
+   - RAG запросы могут занимать 30-120 секунд
+   - Убедитесь, что таймауты в nginx (300s) больше времени обработки
+
 ## Проблема: Файлы test_final_v2.py и prompts.py не найдены
 
 Если файлы лежат на директорию выше (в корне проекта):
@@ -205,6 +238,127 @@ command: >
 docker stats --no-stream rag_web_backend
 
 # Если память постоянно растет - возможна утечка
+```
+
+## Проблема: Контейнеры в статусе "Created" (не запускаются)
+
+Если `docker-compose ps -a` показывает статус "Created" вместо "Running", контейнеры созданы, но не запущены.
+
+### Быстрое решение:
+
+```bash
+# Попробовать запустить вручную
+docker-compose start
+
+# Или перезапустить
+docker-compose restart
+
+# Или пересоздать и запустить
+docker-compose up -d
+
+# Проверить логи после попытки запуска
+docker-compose logs backend
+docker-compose logs frontend
+```
+
+### Если не помогает:
+
+```bash
+# Запустить в foreground для просмотра ошибок
+docker-compose up
+
+# Или только backend
+docker-compose up backend
+```
+
+### Проверить ошибки в логах:
+
+```bash
+# Все логи
+docker-compose logs
+
+# Логи с последними строками
+docker-compose logs --tail=100
+
+# Проверить конкретные ошибки
+docker-compose logs backend | grep -i error
+docker-compose logs frontend | grep -i error
+```
+
+## Проблема: Контейнеры не отображаются или не запускаются
+
+### 1. Проверить статус контейнеров
+
+```bash
+# Проверить все контейнеры (включая остановленные)
+docker-compose ps -a
+
+# Или через docker
+docker ps -a | grep rag_web
+
+# Проверить, запущены ли контейнеры
+docker ps | grep rag_web
+```
+
+### 2. Проверить логи всех сервисов
+
+```bash
+# Все логи
+docker-compose logs
+
+# Логи backend
+docker-compose logs backend
+
+# Логи frontend
+docker-compose logs frontend
+
+# Последние 100 строк
+docker-compose logs --tail=100
+
+# Следить в реальном времени
+docker-compose logs -f
+```
+
+### 3. Проверить ошибки при сборке
+
+```bash
+# Пересобрать с выводом логов
+docker-compose build --no-cache
+
+# Проверить ошибки сборки backend
+docker-compose build --no-cache backend 2>&1 | tail -50
+
+# Проверить ошибки сборки frontend
+docker-compose build --no-cache frontend 2>&1 | tail -50
+```
+
+### 4. Проверить, что файлы на месте
+
+```bash
+# Проверить наличие необходимых файлов
+cd ~/RAG_analysis/rag_web
+
+# Проверить docker-compose.yml
+ls -la docker-compose.yml
+
+# Проверить файлы из корня проекта
+ls -la ../test_final_v2.py ../prompts.py
+
+# Проверить .env файл
+ls -la backend/.env
+
+# Проверить Dockerfile'ы
+ls -la Dockerfile.backend Dockerfile.frontend
+```
+
+### 5. Запустить в интерактивном режиме для просмотра ошибок
+
+```bash
+# Запустить backend и посмотреть вывод
+docker-compose up backend
+
+# Или оба сразу
+docker-compose up
 ```
 
 ## Проблема: Backend не отображается или не запускается
