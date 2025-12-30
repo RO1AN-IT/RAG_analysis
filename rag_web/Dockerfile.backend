@@ -13,12 +13,13 @@ WORKDIR /app
 COPY rag_web/backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Копирование кода приложения backend (сначала, чтобы установить структуру)
+COPY rag_web/backend/ /app/
+
 # Копирование файлов из корня проекта (нужны для импортов в views.py)
+# Эти файлы должны быть доступны в /app/ для импорта
 COPY test_final_v2.py /app/
 COPY prompts.py /app/
-
-# Копирование кода приложения backend
-COPY rag_web/backend/ /app/
 
 # Создание директории для статики
 RUN mkdir -p /app/staticfiles

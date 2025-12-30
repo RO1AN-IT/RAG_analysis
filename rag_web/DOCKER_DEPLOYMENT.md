@@ -63,9 +63,16 @@ sudo sh get-docker.sh
 # Добавить пользователя в группу docker
 sudo usermod -aG docker $USER
 
-# Установить Docker Compose (уже включен в новые версии Docker)
-# Проверить версию
-docker compose version
+# Проверить версию Docker
+docker --version
+
+# Проверить Docker Compose (может быть docker compose или docker-compose)
+docker compose version || docker-compose --version
+
+# Если docker compose не работает, установить docker-compose отдельно:
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+docker-compose --version
 
 # Перелогиниться для применения группы docker
 exit
@@ -91,20 +98,25 @@ nano backend/.env
 ### 2. Запуск
 
 ```bash
-# Собрать и запустить контейнеры
+# Проверить, какая команда работает
+docker compose version || docker-compose --version
+
+# Если работает docker compose (новая версия):
 docker compose up -d --build
-
-# Проверить статус
 docker compose ps
-
-# Посмотреть логи
 docker compose logs -f
-
-# Остановить
 docker compose down
-
-# Остановить и удалить volumes (БД будет удалена!)
 docker compose down -v
+
+# Если работает docker-compose (старая версия):
+docker-compose up -d --build
+docker-compose ps
+docker-compose logs -f
+docker-compose down
+docker-compose down -v
+
+# ВНИМАНИЕ: В дальнейших примерах используется docker compose
+# Если у вас docker-compose, замените все "docker compose" на "docker-compose"
 ```
 
 ### 3. Управление

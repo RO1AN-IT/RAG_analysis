@@ -11,6 +11,9 @@ services:
       - "8000:8000"
     volumes:
       - backend_static:/app/staticfiles
+      # Монтируем файлы из корня проекта (если они там лежат)
+      - ../test_final_v2.py:/app/test_final_v2.py:ro
+      - ../prompts.py:/app/prompts.py:ro
     env_file:
       - ./backend/.env
     environment:
