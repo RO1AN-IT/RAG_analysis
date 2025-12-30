@@ -608,9 +608,6 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
 
   return (
     <div className="video-avatar-container">
-      <div className="video-header">
-        <h3>🎥 Видео-аватар HeyGen</h3>
-      </div>
       
       {/* Статус */}
       {status && (
@@ -736,9 +733,7 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
           {/* Placeholder как в heygen_test - скрывается при получении видеопотока */}
           {showPlaceholder && (
             <div className="video-placeholder" id="placeholder">
-              {answer && !skipVideo 
-                ? 'Нажмите "Начать сессию" для запуска аватара' 
-                : 'Ожидание данных для генерации видео'}
+              {/* Текст placeholder удален */}
             </div>
           )}
         </div>

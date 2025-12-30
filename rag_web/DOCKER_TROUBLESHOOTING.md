@@ -1,5 +1,110 @@
 # Устранение неполадок Docker Compose
 
+## Проблема: Ответ был сгенерирован, но не появился на сайте
+
+Если ответ был сгенерирован на backend, но не отображается на сайте:
+
+### 1. Проверить логи браузера (консоль разработчика)
+
+Откройте консоль браузера (F12) и проверьте:
+- Есть ли ошибки JavaScript
+- Что показывают `console.log` сообщения из `App.js`
+- Какой статус ответа (200, 504, 500 и т.д.)
+
+### 2. Проверить логи backend на сервере
+
+```bash
+# Посмотреть последние логи backend
+docker-compose logs backend | tail -100
+
+# Проверить, что ответ действительно отправляется
+docker-compose logs backend | grep -i "POST.*query"
+```
+
+### 3. Проверить логи frontend (nginx)
+
+```bash
+# Проверить access лог
+docker-compose exec frontend tail -50 /var/log/nginx/access.log
+
+# Проверить error лог
+docker-compose exec frontend tail -50 /var/log/nginx/error.log
+```
+
+### 4. Проверить, что ответ корректный
+
+```bash
+# Тестовый запрос напрямую к backend
+curl -X POST http://localhost:8000/api/query/ \
+  -H "Content-Type: application/json" \
+  -d '{"query": "тест"}' | jq .
+
+# Или через frontend
+curl -X POST http://localhost/api/query/ \
+  -H "Content-Type: application/json" \
+  -d '{"query": "тест"}' | jq .
+```
+
+### 5. Возможные причины:
+
+- **Таймаут nginx**: Ответ пришел, но nginx разорвал соединение (исправлено увеличением таймаутов)
+- **Ошибка JSON парсинга**: Ответ не в формате JSON
+- **Пустой ответ**: `data.answer` пустой или undefined
+- **Ошибка JavaScript**: Ошибка в коде обработки ответа (проверить консоль браузера)
+
+### 6. Пересобрать frontend с обновленным кодом
+
+```bash
+# Если код был изменен, пересобрать frontend
+cd ~/RAG_analysis/rag_web
+docker-compose build frontend
+docker-compose up -d --force-recreate frontend
+```
+
+## Проблема: Видеоаватар не поспевает за речью (синхронизация)
+
+Если видеоаватар работает, но видео отстает от речи:
+
+### Причины:
+
+1. **WebRTC buffer** - видео буферизуется в браузере
+2. **Сетевая задержка** - высокий ping до HeyGen серверов
+3. **Обработка на стороне HeyGen** - сервер HeyGen обрабатывает видео с задержкой
+4. **Задержка перед отправкой текста** - текст отправляется до готовности видео потока
+
+### Решения:
+
+1. **Таймауты nginx не помогут** - синхронизация зависит от WebRTC, а не от HTTP таймаутов
+2. **Проверить WebRTC connection quality:**
+   ```bash
+   # В консоли браузера (F12) проверить статистику WebRTC
+   # После запуска streaming сессии выполнить:
+   const pc = window.peerConnectionRef?.current;
+   if (pc) {
+     pc.getStats().then(stats => {
+       stats.forEach(report => {
+         if (report.type === 'inbound-rtp') {
+           console.log('Video stats:', report);
+         }
+       });
+     });
+   }
+   ```
+
+3. **Увеличить задержку перед отправкой текста** (если видео не успевает инициализироваться):
+   - В `VideoAvatar.js` задержка уже есть: `await new Promise(resolve => setTimeout(resolve, 500));`
+   - Можно увеличить до 1000-2000ms, но это не решит проблему, если видео отстает постоянно
+
+4. **Проверить качество сети:**
+   - Высокая задержка до HeyGen серверов может вызывать проблемы
+   - Использовать более стабильное соединение
+
+5. **Ограничение HeyGen API:**
+   - Это известная проблема HeyGen streaming - видео может немного отставать от речи
+   - Обычно это нормально и не критично для понимания
+
+**Важно:** Таймауты nginx влияют только на HTTP запросы (получение токена, создание сессии), но не на WebRTC streaming поток. Если проблема именно в синхронизации во время streaming, то nginx таймауты не помогут.
+
 ## Проблема: 504 Gateway Timeout (upstream timed out)
 
 Если в логах frontend видите:

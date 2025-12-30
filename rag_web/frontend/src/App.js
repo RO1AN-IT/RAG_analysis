@@ -103,17 +103,31 @@ function App() {
       clearInterval(progressInterval);
       setProgress(100);
 
+      console.log('Ответ получен, status:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error('Ошибка при обработке запроса');
+        const errorText = await response.text();
+        console.error('Ошибка ответа:', response.status, errorText);
+        throw new Error(`Ошибка ${response.status}: ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('Данные получены:', {
+        hasAnswer: !!data.answer,
+        answerLength: data.answer?.length || 0,
+        coordinatesCount: data.coordinates?.length || 0,
+        resultsCount: data.results_count || 0,
+        hasCoordinates: data.has_coordinates || false
+      });
+      
       setAnswer(data.answer || '');
       setCoordinates(data.coordinates || []);
       setResultsCount(data.results_count || 0);
       setHasCoordinates(data.has_coordinates || false);
+      
+      console.log('State установлен, answer:', data.answer ? 'есть' : 'нет');
     } catch (error) {
-      console.error('Ошибка:', error);
+      console.error('Ошибка при обработке запроса:', error);
       setAnswer(`Ошибка: ${error.message}`);
     } finally {
       setIsLoading(false);

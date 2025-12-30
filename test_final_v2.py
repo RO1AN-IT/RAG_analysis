@@ -664,15 +664,17 @@ class RAGSystemLangChain:
             retrieved_data = "Данные не найдены в базе."
             coordinates_section = ""
         else:
-            # Ограничиваем размер данных для промпта
-            max_rows = 50
-            if len(results_df) > max_rows:
-                retrieved_data = f"Найдено {len(results_df)} записей. Показаны первые {max_rows}:\n\n"
-                retrieved_data += results_df.head(max_rows).to_string(index=False)
+            # Ограничиваем размер данных для промпта (первые 10 записей)
+            # Но координаты извлекаем из всех результатов для отображения на карте
+            max_rows_for_prompt = 10
+            total_results = len(results_df)
+            if total_results > max_rows_for_prompt:
+                retrieved_data = f"Найдено {total_results} записей. Показаны первые {max_rows_for_prompt}:\n\n"
+                retrieved_data += results_df.head(max_rows_for_prompt).to_string(index=False)
             else:
                 retrieved_data = results_df.to_string(index=False)
             
-            # Извлечение координат из результатов
+            # Извлечение координат из ВСЕХ результатов (для отображения на карте)
             coordinates_list = []
             if 'lon' in results_df.columns and 'lat' in results_df.columns:
                 for idx, row in results_df.iterrows():
@@ -705,9 +707,13 @@ class RAGSystemLangChain:
                         if lon_str and lat_str and lon_str not in ['nan', 'None'] and lat_str not in ['nan', 'None']:
                             coordinates_list.append(f"Запись {idx + 1}: Долгота: {lon_str}, Широта: {lat_str}")
             
-            # Формируем секцию с координатами
+            # Формируем секцию с координатами (все координаты, не только первые 10)
+            # Но в тексте указываем, что для промпта показаны только первые 10 записей
             if coordinates_list:
-                coordinates_section = "\n\n" + "="*60 + "\nКООРДИНАТЫ НАЙДЕННЫХ ЗАПИСЕЙ:\n" + "="*60 + "\n" + "\n".join(coordinates_list) + "\n" + "="*60
+                coords_text = "\n".join(coordinates_list)
+                if total_results > max_rows_for_prompt:
+                    coords_text = f"Всего найдено {total_results} записей с координатами. В данных для анализа показаны первые {max_rows_for_prompt} записей, но все координаты доступны на карте.\n\n" + coords_text
+                coordinates_section = "\n\n" + "="*60 + "\nКООРДИНАТЫ НАЙДЕННЫХ ЗАПИСЕЙ:\n" + "="*60 + "\n" + coords_text + "\n" + "="*60
             else:
                 coordinates_section = "\n\n⚠️ ВНИМАНИЕ: Координаты не найдены в данных."
         

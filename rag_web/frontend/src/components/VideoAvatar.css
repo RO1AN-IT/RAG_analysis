@@ -8,7 +8,8 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
@@ -63,6 +64,8 @@
   margin-top: 1rem;
   width: 100%;
   position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Video wrapper как в heygen_test */
