@@ -124,6 +124,180 @@ sudo lsof -i :80
 sudo lsof -i :8000
 ```
 
+## Проблема: Worker убивается из-за нехватки памяти (SIGKILL! Perhaps out of memory?)
+
+Это означает, что процесс Gunicorn worker превысил доступный лимит RAM.
+
+### 1. Проверить использование памяти контейнера
+
+```bash
+# Посмотреть статистику использования памяти
+docker stats rag_web_backend
+
+# Или для всех контейнеров
+docker stats
+
+# Проверить, сколько памяти доступно на сервере
+free -h
+```
+
+### 2. Увеличить лимит памяти в docker-compose.yml
+
+**Вариант А: Для Docker Compose версии 3.x+ (рекомендуется)**
+
+В `docker-compose.yml` добавьте:
+
+```yaml
+backend:
+  deploy:
+    resources:
+      limits:
+        memory: 4G  # Для 1 ядра и 8GB RAM - 4GB для backend
+      reservations:
+        memory: 1G
+```
+
+**Вариант Б: Для старых версий Docker Compose (если deploy не работает)**
+
+```yaml
+backend:
+  mem_limit: 2g  # Лимит памяти в байтах (2GB)
+  mem_reservation: 512m  # Минимальная гарантированная память
+```
+
+После изменения:
+```bash
+docker compose down
+docker compose up -d
+```
+
+**Проверить версию Docker Compose:**
+```bash
+docker compose version || docker-compose --version
+```
+
+### 3. Уменьшить количество workers
+
+Если память ограничена, уменьшите количество workers в команде Gunicorn:
+
+```yaml
+command: >
+  sh -c "
+    python manage.py migrate &&
+    python manage.py collectstatic --noinput &&
+    gunicorn --bind 0.0.0.0:8000 --workers 1 --timeout 300 config.wsgi:application
+  "
+```
+
+### 4. Оптимизировать обработку больших данных
+
+Если проблема возникает при обработке большого количества документов (например, 25000+), рассмотрите:
+
+- Использование пагинации
+- Обработку данных порциями (batches)
+- Увеличение таймаута для долгих запросов
+- Использование async workers (gevent/eventlet) для I/O-bound операций
+
+### 5. Проверить утечки памяти
+
+```bash
+# Мониторить использование памяти в реальном времени
+docker stats --no-stream rag_web_backend
+
+# Если память постоянно растет - возможна утечка
+```
+
+## Проблема: Backend не отображается или не запускается
+
+### 1. Проверить статус контейнеров
+
+```bash
+# Проверить все контейнеры
+docker-compose ps
+
+# Или через docker
+docker ps -a | grep rag_web
+
+# Проверить логи backend
+docker-compose logs backend
+
+# Проверить логи с последними строками
+docker-compose logs --tail=100 backend
+```
+
+### 2. Если `deploy.resources` не работает
+
+Если `deploy` не работает (часто на старых версиях Docker Compose без Swarm), используйте альтернативный вариант:
+
+**Замените в `docker-compose.yml`:**
+
+```yaml
+# УДАЛИТЬ это:
+deploy:
+  resources:
+    limits:
+      memory: 4G
+    reservations:
+      memory: 1G
+
+# ДОБАВИТЬ это (альтернатива для старых версий):
+mem_limit: 4g
+mem_reservation: 1g
+```
+
+Затем:
+```bash
+docker-compose down
+docker-compose up -d --build
+```
+
+### 3. Проверить ошибки при запуске
+
+```bash
+# Запустить в foreground для просмотра ошибок
+docker-compose up backend
+
+# Или посмотреть последние ошибки
+docker-compose logs backend | grep -i error
+docker-compose logs backend | tail -50
+```
+
+### 4. Проверить, что контейнер запущен
+
+```bash
+# Проверить процессы внутри контейнера
+docker-compose exec backend ps aux
+
+# Проверить, что Gunicorn работает
+docker-compose exec backend ps aux | grep gunicorn
+
+# Проверить порт внутри контейнера
+docker-compose exec backend netstat -tlnp | grep 8000
+```
+
+### 5. Если контейнер падает сразу после запуска
+
+```bash
+# Проверить, что файлы на месте
+docker-compose exec backend ls -la /app/test_final_v2.py /app/prompts.py
+
+# Проверить импорты
+docker-compose exec backend python -c "import test_final_v2; import prompts; print('OK')"
+
+# Проверить .env файл
+docker-compose exec backend env | grep DJANGO
+```
+
+### 6. Проверить, что backend отвечает
+
+```bash
+# Изнутри контейнера
+docker-compose exec backend curl http://localhost:8000/api/query/
+
+# С хоста
+curl http://localhost:8000/api/query/
+```
+
 ## Полная пересборка
 
 Если ничего не помогает:

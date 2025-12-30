@@ -177,19 +177,24 @@ docker compose logs | grep -i error
 ## Файловая структура
 
 ```
-rag_web/
-├── docker-compose.yml          # Конфигурация всех сервисов
-├── Dockerfile.backend          # Dockerfile для Django
-├── Dockerfile.frontend         # Dockerfile для React
-├── .dockerignore              # Файлы, которые не копировать в Docker
-├── docker/
-│   └── nginx.conf             # Конфигурация Nginx для frontend
-├── backend/
-│   ├── .env                   # Переменные окружения (НЕ коммитить!)
-│   └── ...
-└── frontend/
-    └── ...
+RAG_analysis/                   # Корень проекта
+├── test_final_v2.py            # Файлы, нужные для backend
+├── prompts.py                  # Монтируются через volumes
+└── rag_web/
+    ├── docker-compose.yml      # Конфигурация всех сервисов
+    ├── Dockerfile.backend      # Dockerfile для Django
+    ├── Dockerfile.frontend     # Dockerfile для React
+    ├── .dockerignore          # Файлы, которые не копировать в Docker
+    ├── docker/
+    │   └── nginx.conf         # Конфигурация Nginx для frontend
+    ├── backend/
+    │   ├── .env               # Переменные окружения (НЕ коммитить!)
+    │   └── ...
+    └── frontend/
+        └── ...
 ```
+
+**Важно**: Файлы `test_final_v2.py` и `prompts.py` должны находиться в корне проекта (`RAG_analysis/`). Они монтируются в контейнер через volumes, поэтому при их изменении контейнер не нужно пересобирать.
 
 ## Важные моменты
 
@@ -197,6 +202,7 @@ rag_web/
 2. **База данных** будет внутри контейнера - для продакшена лучше использовать внешнюю БД
 3. **Статические файлы** собираются при запуске контейнера
 4. **Миграции** выполняются автоматически при запуске
+5. **test_final_v2.py и prompts.py** монтируются из корня проекта (`../`) - убедитесь, что они там есть
 
 ## Сравнение с предыдущим подходом
 

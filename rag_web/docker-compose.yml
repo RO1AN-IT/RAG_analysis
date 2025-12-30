@@ -9,6 +9,16 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    # Для Docker Compose 3.x+ с Swarm (если не работает, используйте mem_limit ниже)
+    deploy:
+      resources:
+        limits:
+          memory: 4G  # 4GB из 8GB для backend (1 ядро, 8GB RAM)
+        reservations:
+          memory: 1G  # Минимальная гарантированная память
+    # Альтернатива для старых версий (раскомментируйте, если deploy не работает):
+    # mem_limit: 4g
+    # mem_reservation: 1g
     volumes:
       - backend_static:/app/staticfiles
       # Монтируем файлы из корня проекта (если они там лежат)
@@ -22,7 +32,7 @@ services:
       sh -c "
         python manage.py migrate &&
         python manage.py collectstatic --noinput &&
-        gunicorn --bind 0.0.0.0:8000 --workers 3 --timeout 120 config.wsgi:application
+        gunicorn --bind 0.0.0.0:8000 --workers 1 --timeout 300 --worker-class sync --max-requests 100 --max-requests-jitter 10 config.wsgi:application
       "
     networks:
       - rag_network
