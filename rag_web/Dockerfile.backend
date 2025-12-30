@@ -1,0 +1,34 @@
+# Dockerfile для Django Backend
+FROM python:3.11-slim
+
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Установка рабочей директории
+WORKDIR /app
+
+# Копирование requirements и установка зависимостей
+COPY rag_web/backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Копирование файлов из корня проекта (нужны для импортов в views.py)
+COPY test_final_v2.py /app/
+COPY prompts.py /app/
+
+# Копирование кода приложения backend
+COPY rag_web/backend/ /app/
+
+# Создание директории для статики
+RUN mkdir -p /app/staticfiles
+
+# Сборка статических файлов (будет выполнено при запуске через entrypoint)
+# Выполнение миграций (будет выполнено при запуске через entrypoint)
+
+# Порт
+EXPOSE 8000
+
+# Команда по умолчанию
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120", "config.wsgi:application"]
+
