@@ -1,1 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Django
+*.log
+db.sqlite3
+db.sqlite3-journal
+/staticfiles/
+/media/
+
+# React / Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+/build
+.DS_Store
+
+# Environment variables - КРИТИЧЕСКИ ВАЖНО!
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+*.csv
+*.zip
+*.db
+*.sqlite
+*.sqlite3
+
+# Large data directories
 ЦК(25.06.25)/
+haha_visual/
+opensearch_export/
+rag_web/opensearch_export/
+rag_web/public_html/
+heygen_test/
+rubbish/
+opensearc_command/
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+opensearch-certs/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup

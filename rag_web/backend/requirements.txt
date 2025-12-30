@@ -1,0 +1,12 @@
+Django>=4.2.0
+django-cors-headers>=4.0.0
+pandas>=2.0.0
+opensearch-py>=2.0.0
+sentence-transformers>=2.2.0
+gigachat>=0.1.0
+duckdb>=0.8.0
+langchain-core>=0.1.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+gunicorn>=21.2.0
+
