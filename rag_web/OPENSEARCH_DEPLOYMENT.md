@@ -511,6 +511,47 @@ docker compose -f docker-compose.opensearch.yml down -v
 docker compose -f docker-compose.opensearch.yml up -d
 ```
 
+### Проблема: Конфликт имени контейнера
+
+**Ошибка:** `Error response from daemon: Conflict. The container name "/opensearch" is already in use`
+
+**Решение:**
+
+```bash
+# Вариант 1: Остановить и удалить старый контейнер через docker-compose
+docker compose -f docker-compose.opensearch.yml down
+docker compose -f docker-compose.opensearch.yml up -d
+
+# Вариант 2: Если docker-compose не работает, удалить контейнер вручную
+# Сначала проверить существующие контейнеры
+docker ps -a | grep opensearch
+
+# Остановить старый контейнер
+docker stop opensearch
+docker stop opensearch-dashboards
+
+# Удалить старые контейнеры
+docker rm opensearch
+docker rm opensearch-dashboards
+
+# Теперь запустить заново
+docker compose -f docker-compose.opensearch.yml up -d
+
+# Вариант 3: Удалить все остановленные контейнеры (если их много)
+docker container prune -f
+
+# Затем запустить заново
+docker compose -f docker-compose.opensearch.yml up -d
+```
+
+**Важно:** Если в старом контейнере есть важные данные, сначала сделайте экспорт:
+```bash
+# Экспорт данных перед удалением
+export OPENSEARCH_HOST=localhost
+export OPENSEARCH_PORT=9200
+python export_opensearch.py
+```
+
 ### Проблема: Backend не может подключиться к OpenSearch
 
 ```bash

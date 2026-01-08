@@ -158,6 +158,21 @@ curl http://localhost:9200/_cluster/health?pretty
 
 ## 🐛 Устранение проблем
 
+### Конфликт имени контейнера
+
+**Ошибка:** `Conflict. The container name "/opensearch" is already in use`
+
+```bash
+# Решение: удалить старый контейнер
+docker compose -f docker-compose.opensearch.yml down
+docker compose -f docker-compose.opensearch.yml up -d
+
+# Или вручную:
+docker stop opensearch opensearch-dashboards
+docker rm opensearch opensearch-dashboards
+docker compose -f docker-compose.opensearch.yml up -d
+```
+
 ### OpenSearch не запускается
 
 ```bash
