@@ -16,11 +16,8 @@ from typing import List, Dict, Any
 # Конфигурация локального OpenSearch
 OPENSEARCH_HOST = os.environ.get('OPENSEARCH_HOST', 'localhost')
 OPENSEARCH_PORT = int(os.environ.get('OPENSEARCH_PORT', 9200))
-OPENSEARCH_USE_SSL = os.environ.get('OPENSEARCH_USE_SSL', 'False').lower() == 'true'
-OPENSEARCH_VERIFY_CERTS = os.environ.get('OPENSEARCH_VERIFY_CERTS', 'False').lower() == 'true'
-# Настройка аутентификации
-OPENSEARCH_USERNAME = os.environ.get('OPENSEARCH_USERNAME') or os.environ.get('OPENSEARCH_AUTH_USERNAME')
-OPENSEARCH_PASSWORD = os.environ.get('OPENSEARCH_PASSWORD') or os.environ.get('OPENSEARCH_AUTH_PASSWORD')
+OPENSEARCH_USERNAME = os.environ.get('OPENSEARCH_USERNAME', 'admin')
+OPENSEARCH_PASSWORD = os.environ.get('OPENSEARCH_PASSWORD', 'Rodion1killer')
 
 # Индексы для экспорта
 INDICES_TO_EXPORT = ['rag_descriptions', 'rag_layers']
@@ -165,23 +162,14 @@ def main():
     # Подключение к OpenSearch
     print(f"\n🔌 Подключение к OpenSearch...")
     print(f"   Host: {OPENSEARCH_HOST}:{OPENSEARCH_PORT}")
-    print(f"   SSL: {OPENSEARCH_USE_SSL}")
-    if OPENSEARCH_USERNAME:
-        print(f"   Username: {OPENSEARCH_USERNAME}")
-    else:
-        print(f"   Authentication: disabled")
+    print(f"   SSL: {'True'}")
     
     try:
-        # Настройка аутентификации (если указана)
-        auth = None
-        if OPENSEARCH_USERNAME and OPENSEARCH_PASSWORD:
-            auth = (OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD)
-        
         client = OpenSearch(
             hosts=[{'host': OPENSEARCH_HOST, 'port': OPENSEARCH_PORT}],
-            http_auth=auth,
-            use_ssl=OPENSEARCH_USE_SSL,
-            verify_certs=OPENSEARCH_VERIFY_CERTS,
+            http_auth=(OPENSEARCH_USERNAME, OPENSEARCH_PASSWORD),
+            use_ssl=True,
+            verify_certs=False,
             timeout=60
         )
         

@@ -207,105 +207,77 @@ def prepare_video_text(full_answer: str, has_coordinates: bool = False, user_que
         return video_text
 
 
-def should_generate_video(answer: str, results_count: int = None) -> bool:
+def should_generate_video(answer: str) -> bool:
     """
-    Проверяет, нужно ли генерировать видео на основе ответа и количества результатов.
-    Генерируем видео, если есть данные (даже без координат).
-    НЕ генерируем видео только если вообще нет данных по признаку.
+    Проверяет, нужно ли генерировать видео на основе ответа.
+    Не генерируем видео, если данных не найдено.
     
     Args:
         answer: Ответ системы
-        results_count: Количество найденных результатов (опционально)
         
     Returns:
         True если нужно генерировать видео, False если нет
     """
-    # Если передан results_count и он больше 0 - генерируем видео
-    if results_count is not None and results_count > 0:
-        logger.info(f"Видео будет сгенерировано: найдено {results_count} результатов")
-        return True
-    
     answer_lower = answer.lower()
     
-    # Фразы, которые ОДНОЗНАЧНО указывают на полное отсутствие данных (только если results_count не передан)
-    # Эти фразы должны указывать на полное отсутствие результатов, а не на отсутствие части данных (например, координат)
-    strict_no_data_phrases = [
-        'к сожалению, по вашему запросу не найдено',
-        'релевантных признаков в базе',
-        'результатов не найдено',
-        'ничего не найдено',
-        'не найдено результатов',
-        'данные не найдены в базе',
-        'не найдено данных в базе',
-        'отсутствуют данные в базе',
-        'не найдено релевантных данных'
-    ]
-    
-    # Проверяем наличие строгих фраз об отсутствии данных (только если не знаем results_count)
-    for phrase in strict_no_data_phrases:
-        if phrase in answer_lower:
-            logger.info(f"Видео не будет сгенерировано: обнаружена строгая фраза об отсутствии данных '{phrase}'")
-            return False
-    
-    # Если не нашли строгих фраз - генерируем видео (возможно, просто нет координат, но данные есть)
-    # Но проверяем, нет ли явных признаков полного отсутствия данных
-    weak_no_data_indicators = [
+    # Фразы, которые указывают на отсутствие данных
+    no_data_phrases = [
         'не найдено',
         'не найдены',
         'данных нет',
-        'нет данных'
+        'данные не найдены',
+        'результатов не найдено',
+        'ничего не найдено',
+        'к сожалению, по вашему запросу не найдено',
+        'не удалось найти',
+        'не обнаружено',
+        'отсутствуют данные',
+        'нет данных',
+        'релевантных признаков в базе',
+        'ошибка'
     ]
     
-    # Если есть слабые индикаторы, но нет информации о количестве результатов - 
-    # более консервативный подход: проверяем контекст
-    weak_indicators_found = any(indicator in answer_lower for indicator in weak_no_data_indicators)
-    
-    if weak_indicators_found and results_count is None:
-        # Проверяем, не говорит ли ответ о полном отсутствии данных
-        # Если фраза стоит в начале ответа или в контексте "не найдено данных" - это признак отсутствия
-        if any(answer_lower.startswith(phrase) or f' {phrase} ' in answer_lower or f' {phrase}.' in answer_lower 
-               for phrase in ['не найдено', 'данных нет', 'нет данных']):
-            logger.info("Видео не будет сгенерировано: обнаружены слабые индикаторы отсутствия данных")
+    # Проверяем наличие фраз об отсутствии данных
+    for phrase in no_data_phrases:
+        if phrase in answer_lower:
+            logger.info(f"Видео не будет сгенерировано: обнаружена фраза '{phrase}'")
             return False
     
-    # По умолчанию генерируем видео, если не доказано обратное
-    logger.info("Видео будет сгенерировано: данные найдены или не доказано обратное")
     return True
 
 
 @method_decorator(csrf_exempt, name='dispatch') 
 class HeyGenView(View):
-    """API endpoint для подготовки текста для streaming видео через Interactive Avatar."""
+    """API endpoint для генерации видео через HeyGen."""
     
     def post(self, request):
-        """Подготовка текста для streaming видео (не генерирует видео, только подготавливает текст для Interactive Avatar)."""
+        """Генерация видео через HeyGen API."""
         try:
             data = json.loads(request.body)
             full_answer = data.get('answer', '').strip()
             user_query = data.get('user_query', '').strip()
             has_coordinates = data.get('has_coordinates', False)
-            results_count = data.get('results_count', None)  # Получаем количество результатов
             
             if not full_answer:
                 return JsonResponse({
                     'error': 'Ответ не может быть пустым'
                 }, status=400)
             
-            # Проверяем, нужно ли генерировать видео (передаем results_count для более точной проверки)
-            if not should_generate_video(full_answer, results_count=results_count):
-                logger.info(f"Видео не будет сгенерировано: данные не найдены (results_count={results_count})")
+            # Проверяем, нужно ли генерировать видео
+            if not should_generate_video(full_answer):
+                logger.info("Видео не будет сгенерировано: данные не найдены")
                 return JsonResponse({
                     'error': 'Видео не генерируется, так как данные не найдены',
                     'skip_video': True
                 }, status=200)
             
-            # Генерируем текст для видео через GigaChat (только подготовка текста для streaming)
-            logger.info("Подготовка текста для streaming видео-аватара (Interactive Avatar)")
+            # Генерируем текст для видео через GigaChat
+            logger.info("Генерация текста для видео-аватара")
             video_text = prepare_video_text(full_answer, has_coordinates, user_query)
             
-            # HeyGen Streaming API имеет ограничение на длину текста (обычно ~2000-2500 символов)
+            # HeyGen API имеет ограничение на длину текста (обычно ~2000-2500 символов)
             # Обрезаем текст до разумного лимита, сохраняя целостность предложений
-            MAX_TEXT_LENGTH = 2000  # Максимальная длина текста для HeyGen Streaming API
+            MAX_TEXT_LENGTH = 2000  # Максимальная длина текста для HeyGen API
             if len(video_text) > MAX_TEXT_LENGTH:
                 logger.warning(f"Текст для видео слишком длинный ({len(video_text)} символов), обрезаем до {MAX_TEXT_LENGTH}")
                 # Обрезаем до последнего полного предложения перед лимитом
@@ -326,20 +298,146 @@ class HeyGenView(View):
                     video_text = truncated + " [текст обрезан из-за ограничений API]"
                 logger.info(f"Текст обрезан до {len(video_text)} символов")
             
-            # Возвращаем только подготовленный текст для streaming генерации
-            # Само видео будет генерироваться через streaming API во frontend (Interactive Avatar)
-            logger.info(f"Текст подготовлен для streaming генерации: {len(video_text)} символов")
-            return JsonResponse({
-                'video_text': video_text,
-                'message': 'Текст подготовлен для streaming генерации через Interactive Avatar'
-            })
+            # Получаем API ключ из переменных окружения (как в heygen_test)
+            heygen_api_key = os.environ.get('HEYGEN_API_KEY', 'sk_V2_hgu_k1upmcGvBz3_QufVJuSjUjtPgAwTNhCwSKRGTzWqy9Hk')
+            heygen_avatar_id = os.environ.get('HEYGEN_AVATAR_ID', 'nik_blue_expressive_20240910')
+            heygen_voice_id = os.environ.get('HEYGEN_VOICE_ID', '453c20e1525a429080e2ad9e4b26f2cd')
+            heygen_generate_url = os.environ.get('HEYGEN_GENERATE_URL', 'https://api.heygen.com/v2/video/generate')
+            
+            # Логируем частично API ключ для отладки (первые и последние символы)
+            if heygen_api_key:
+                api_key_preview = f"{heygen_api_key[:10]}...{heygen_api_key[-10:]}" if len(heygen_api_key) > 20 else "***"
+                logger.info(f"HeyGen API ключ: {api_key_preview} (длина: {len(heygen_api_key)})")
+            else:
+                logger.warning("HeyGen API ключ не найден в переменных окружения")
+            
+            if not heygen_api_key:
+                logger.warning("HeyGen API ключ не настроен")
+                return JsonResponse({
+                    'error': 'HEYGEN_API_KEY не задан. Установите переменную окружения.'
+                }, status=500)
+            
+            if not heygen_avatar_id:
+                return JsonResponse({
+                    'error': 'avatar_id обязателен. Укажите ID аватара из кабинета HeyGen.'
+                }, status=400)
+            
+            if not heygen_voice_id:
+                return JsonResponse({
+                    'error': 'voice_id обязателен. Укажите ID голоса из кабинета HeyGen.'
+                }, status=400)
+            
+            logger.info(f"Генерация HeyGen видео для текста длиной {len(video_text)} символов")
+            
+            # Структура запроса как в heygen_test
+            # Docs: https://docs.heygen.com/reference/generate-video
+            payload = {
+                "video_inputs": [
+                    {
+                        "character": {
+                            "type": "avatar",
+                            "avatar_id": heygen_avatar_id,
+                        },
+                        "voice": {
+                            "type": "text",
+                            "input_text": video_text,
+                            "voice_id": heygen_voice_id,
+                        },
+                    }
+                ],
+                # Use lower resolution to work with basic plans
+                "dimension": {
+                    "width": 640,
+                    "height": 360,
+                },
+            }
+            
+            # Логируем структуру запроса для отладки (без текста видео)
+            debug_payload = json.loads(json.dumps(payload))
+            if 'video_inputs' in debug_payload and len(debug_payload['video_inputs']) > 0:
+                debug_payload['video_inputs'][0]['voice']['input_text'] = f"[текст длиной {len(video_text)} символов]"
+            logger.info(f"HeyGen API запрос: url={heygen_generate_url}")
+            logger.info(f"HeyGen API payload: {json.dumps(debug_payload, ensure_ascii=False, indent=2)}")
+            
+            # Вызываем HeyGen API
+            try:
+                # Логируем заголовки (без API ключа для безопасности)
+                logger.info(f"Отправка запроса к HeyGen API: {heygen_generate_url}")
+                logger.info(f"Заголовки: X-Api-Key={'*' * 20}..., Content-Type=application/json")
+                
+                response = requests.post(
+                    heygen_generate_url,
+                    headers={
+                        "X-Api-Key": heygen_api_key,
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    json=payload,
+                    timeout=60,  # generation can be slow; allow more time
+                )
+                
+                logger.info(f"HeyGen generate response: status={response.status_code}")
+                
+                # Если 401, логируем больше информации
+                if response.status_code == 401:
+                    logger.error(f"401 Unauthorized - проверьте API ключ. URL: {heygen_generate_url}")
+                    logger.error(f"API ключ начинается с: {heygen_api_key[:15]}...")
+                    logger.error(f"Полный ответ: {response.text}")
+                
+                if response.status_code >= 300:
+                    try:
+                        details = response.json()
+                    except:
+                        details = {"text": response.text}
+                    logger.error(
+                        "HeyGen generate error: status=%s details=%s", response.status_code, details
+                    )
+                    return JsonResponse(
+                        {
+                            "error": "HeyGen вернул ошибку",
+                            "status_code": response.status_code,
+                            "details": details,
+                        },
+                        status=502,
+                    )
+                
+                try:
+                    api_data = response.json()
+                except ValueError:
+                    api_data = {"text": response.text}
+                
+                logger.info(f"HeyGen generate success data: {api_data}")
+                
+                # v2 API returns {"data": {"video_id": "..."}}
+                inner = api_data.get("data") or api_data
+                video_id = inner.get("video_id") or inner.get("task_id") or inner.get("id")
+                
+                if not video_id:
+                    return JsonResponse(
+                        {"error": "Не удалось получить video_id из ответа HeyGen", "details": api_data},
+                        status=502,
+                    )
+                
+                # Возвращаем video_id и video_text для streaming режима
+                return JsonResponse({
+                    'video_id': video_id,
+                    'status': 'processing',
+                    'message': 'Видео создается. Используйте video_id для проверки статуса.',
+                    'video_text': video_text  # Добавляем текст для streaming режима
+                })
+                    
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Ошибка запроса к HeyGen API: {e}")
+                return JsonResponse({
+                    'error': f'Ошибка соединения с HeyGen API: {str(e)}'
+                }, status=500)
                 
         except json.JSONDecodeError:
             return JsonResponse({
                 'error': 'Неверный формат JSON'
             }, status=400)
         except Exception as e:
-            logger.error(f"Ошибка подготовки текста для streaming видео: {e}", exc_info=True)
+            logger.error(f"Ошибка генерации HeyGen видео: {e}", exc_info=True)
             return JsonResponse({
                 'error': f'Ошибка обработки запроса: {str(e)}'
             }, status=500)
