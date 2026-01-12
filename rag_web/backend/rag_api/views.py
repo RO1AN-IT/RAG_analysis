@@ -266,6 +266,8 @@ class QueryView(View):
                     _progress_storage[request_id]['progress'] = 100
                     _progress_storage[request_id]['step'] = 6
                     _progress_storage[request_id]['message'] = 'Запрос выполнен успешно'
+                    _progress_storage[request_id]['completed_at'] = time.time()  # Время завершения для отслеживания
+                    logger.info(f"Запрос {request_id} успешно завершен, результат сохранен")
                     
                 except Exception as e:
                     logger.error(f"Ошибка выполнения запроса: {e}", exc_info=True)
@@ -308,16 +310,18 @@ class QueryProgressView(View):
         
         progress_data = _progress_storage[request_id].copy()
         
-        # Если запрос завершен, удаляем его из хранилища через некоторое время
+        # Если запрос завершен, не удаляем сразу - даем время фронтенду получить результат
         if progress_data['status'] in ['completed', 'error']:
-            # Удаляем через 30 секунд после завершения
-            import threading
-            def cleanup():
-                import time
-                time.sleep(30)
-                if request_id in _progress_storage:
-                    del _progress_storage[request_id]
-            threading.Thread(target=cleanup, daemon=True).start()
+            # Удаляем через 5 минут после завершения (увеличено для надежности)
+            if 'cleanup_scheduled' not in progress_data:
+                progress_data['cleanup_scheduled'] = True
+                def cleanup():
+                    time.sleep(300)  # 5 минут
+                    if request_id in _progress_storage:
+                        logger.info(f"Удаление завершенного запроса {request_id} из хранилища")
+                        del _progress_storage[request_id]
+                cleanup_thread = threading.Thread(target=cleanup, daemon=True)
+                cleanup_thread.start()
         
         return JsonResponse(progress_data)
 
