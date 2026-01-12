@@ -483,27 +483,48 @@ class RAGSystemLangChain:
             feature_description=feature_description
         )
         
-        try:
-            with GigaChat(
-                credentials=self.credentials,
-                verify_ssl_certs=False,
-                scope='GIGACHAT_API_B2B',
-                model='GigaChat-2-Pro'
-            ) as giga:
-                response = giga.chat(prompt)
-                answer = response.choices[0].message.content.strip().upper()
+        max_retries = 3
+        retry_delay = 2  # секунды между попытками
+        
+        for attempt in range(max_retries):
+            try:
+                with GigaChat(
+                    credentials=self.credentials,
+                    verify_ssl_certs=False,
+                    scope='GIGACHAT_API_B2B',
+                    model='GigaChat-2-Pro',
+                    timeout=120,  # Увеличенный timeout для SSL handshake
+                    retry_on_timeout=True
+                ) as giga:
+                    response = giga.chat(prompt)
+                    answer = response.choices[0].message.content.strip().upper()
+                    
+                    # Проверяем ответ
+                    if "ДА" in answer or "YES" in answer:
+                        logger.info(f"Признак '{feature_name}' соответствует запросу")
+                        return True
+                    else:
+                        logger.info(f"Признак '{feature_name}' не соответствует запросу")
+                        return False
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"Ошибка проверки соответствия признака (попытка {attempt + 1}/{max_retries}): {error_msg}")
                 
-                # Проверяем ответ
-                if "ДА" in answer or "YES" in answer:
-                    logger.info(f"Признак '{feature_name}' соответствует запросу")
-                    return True
+                # Если это SSL timeout и есть еще попытки, повторяем
+                if ("timeout" in error_msg.lower() or "handshake" in error_msg.lower()) and attempt < max_retries - 1:
+                    logger.info(f"Повторная попытка через {retry_delay} секунд...")
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Увеличиваем задержку для следующей попытки
+                    continue
                 else:
-                    logger.info(f"Признак '{feature_name}' не соответствует запросу")
+                    # Если все попытки исчерпаны или это не timeout, считаем признак не соответствующим
+                    logger.error(f"Ошибка проверки соответствия признака после {attempt + 1} попыток: {e}")
                     return False
-        except Exception as e:
-            logger.error(f"Ошибка проверки соответствия признака: {e}")
-            # В случае ошибки считаем, что признак не соответствует
-            return False
+        
+        # Если дошли сюда, все попытки исчерпаны
+        logger.error(f"Не удалось проверить признак '{feature_name}' после {max_retries} попыток")
+        return False
     
     def get_columns_info(self) -> str:
         """Получение информации о колонках для промпта."""
