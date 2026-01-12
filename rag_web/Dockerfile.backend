@@ -1,8 +1,12 @@
 # Dockerfile для Django Backend
 FROM python:3.11-slim
 
+# Настройка переменных окружения для неинтерактивной установки пакетов
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TERM=xterm
+
 # Установка системных зависимостей
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     && rm -rf /var/lib/apt/lists/*

@@ -9,7 +9,9 @@ WORKDIR /app
 COPY rag_web/frontend/package*.json ./
 
 # Установка зависимостей
-RUN npm ci
+# Используем npm install вместо npm ci для автоматической синхронизации lock файла
+# Если lock файл не синхронизирован, npm install обновит его автоматически
+RUN npm install --legacy-peer-deps
 
 # Копирование исходного кода
 COPY rag_web/frontend ./
