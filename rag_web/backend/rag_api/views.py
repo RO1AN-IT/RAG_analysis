@@ -83,11 +83,14 @@ def get_rag_system():
 def _send_progress_event(progress_storage, step, progress, message, details=None):
     """Обновление прогресса в хранилище."""
     if progress_storage:
-        progress_storage['step'] = step
-        progress_storage['progress'] = progress
-        progress_storage['message'] = message
-        progress_storage['details'] = details or {}
-        logger.info(f"Обновление прогресса: step={step}, progress={progress}%, message={message[:50] if message else ''}")
+        try:
+            progress_storage['step'] = step
+            progress_storage['progress'] = progress
+            progress_storage['message'] = message
+            progress_storage['details'] = details or {}
+            logger.info(f"Обновление прогресса: step={step}, progress={progress}%, message={message[:50] if message else ''}")
+        except Exception as e:
+            logger.error(f"Ошибка обновления прогресса: {e}", exc_info=True)
 
 
 def _rag_query_with_progress(rag_system, user_query, progress_storage, top_k=20):
@@ -198,7 +201,12 @@ def _rag_query_with_progress(rag_system, user_query, progress_storage, top_k=20)
     except Exception as e:
         logger.error(f"Ошибка в _rag_query_with_progress: {e}", exc_info=True)
         if progress_storage:
-            _send_progress_event(progress_storage, 0, 0, f"Ошибка: {str(e)}", {'error': str(e)})
+            try:
+                _send_progress_event(progress_storage, 0, 0, f"Ошибка: {str(e)}", {'error': str(e)})
+                progress_storage['status'] = 'error'
+                progress_storage['error'] = str(e)
+            except Exception as storage_error:
+                logger.error(f"Ошибка обновления прогресса при ошибке: {storage_error}", exc_info=True)
         raise
 
 
@@ -242,6 +250,7 @@ class QueryView(View):
             # Запускаем запрос в отдельном потоке
             def run_query():
                 try:
+                    logger.info(f"[{request_id}] Начало выполнения запроса в потоке")
                     results_df, answer = _rag_query_with_progress(
                         rag_system, 
                         user_query, 
@@ -249,6 +258,7 @@ class QueryView(View):
                         top_k=20
                     )
                     
+                    logger.info(f"[{request_id}] RAG запрос выполнен, извлекаем координаты...")
                     # Извлекаем координаты
                     coordinates = rag_system.extract_coordinates(results_df)
                     has_coordinates = len(coordinates) > 0
@@ -264,14 +274,19 @@ class QueryView(View):
                     _progress_storage[request_id]['progress'] = 100
                     _progress_storage[request_id]['step'] = 6
                     _progress_storage[request_id]['message'] = 'Запрос выполнен успешно'
+                    logger.info(f"[{request_id}] Запрос успешно завершен")
                     
                 except Exception as e:
-                    logger.error(f"Ошибка выполнения запроса: {e}", exc_info=True)
+                    logger.error(f"[{request_id}] Ошибка выполнения запроса: {e}", exc_info=True)
                     _progress_storage[request_id]['status'] = 'error'
                     _progress_storage[request_id]['error'] = str(e)
+                    _progress_storage[request_id]['progress'] = 0
+                    _progress_storage[request_id]['step'] = 0
+                    _progress_storage[request_id]['message'] = f'Ошибка: {str(e)}'
             
-            thread = threading.Thread(target=run_query)
+            thread = threading.Thread(target=run_query, daemon=True)
             thread.start()
+            logger.info(f"[{request_id}] Поток запущен, request_id возвращен клиенту")
             
             # Возвращаем ID запроса для отслеживания прогресса
             return JsonResponse({
@@ -304,7 +319,13 @@ class QueryProgressView(View):
                 'error': 'Запрос не найден'
             }, status=404)
         
-        progress_data = _progress_storage[request_id].copy()
+        try:
+            progress_data = _progress_storage[request_id].copy()
+        except KeyError:
+            logger.warning(f"Запрос {request_id} не найден в хранилище прогресса")
+            return JsonResponse({
+                'error': 'Запрос не найден'
+            }, status=404)
         
         # Если запрос завершен, удаляем его из хранилища через некоторое время
         if progress_data['status'] in ['completed', 'error']:

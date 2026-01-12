@@ -13,8 +13,9 @@ workers = 3
 worker_class = "sync"
 
 # Таймауты
-timeout = 120  # Время ожидания ответа (важно для долгих запросов RAG)
+timeout = 300  # Время ожидания ответа (важно для долгих запросов RAG) - увеличено до 5 минут
 keepalive = 5
+graceful_timeout = 30  # Время для graceful shutdown
 
 # Логирование
 accesslog = "-"  # stdout
