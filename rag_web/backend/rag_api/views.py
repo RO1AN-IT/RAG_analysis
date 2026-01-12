@@ -144,7 +144,9 @@ def _rag_query_with_progress(rag_system, user_query, progress_storage, top_k=20)
             
             # Прогресс проверки каждого признака
             check_progress = 45 + int((idx + 1) / len(search_results) * 15)
-            _send_progress_event(progress_storage, 3, check_progress, f"Проверка признака {idx + 1}/{len(search_results)}: {feature_name[:30]}...")
+            # Обновляем прогресс только для каждого 5-го признака, чтобы уменьшить нагрузку
+            if (idx + 1) % 5 == 0 or idx == len(search_results) - 1:
+                _send_progress_event(progress_storage, 3, check_progress, f"Проверка признака {idx + 1}/{len(search_results)}: {feature_name[:30]}...")
             
             if rag_system.check_feature_match(user_query, feature_name, feature_desc):
                 matched_features.append({

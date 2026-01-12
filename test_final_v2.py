@@ -475,7 +475,8 @@ class RAGSystemLangChain:
         Returns:
             True если признак соответствует, False иначе
         """
-        logger.info(f"Проверка соответствия признака '{feature_name}' запросу пользователя")
+        # Уменьшаем уровень логирования для частых проверок (debug вместо info)
+        logger.debug(f"Проверка соответствия признака '{feature_name}' запросу пользователя")
         
         prompt = FEATURE_MATCH_PROMPT.format(
             user_query=user_query,
@@ -495,13 +496,13 @@ class RAGSystemLangChain:
                 
                 # Проверяем ответ
                 if "ДА" in answer or "YES" in answer:
-                    logger.info(f"Признак '{feature_name}' соответствует запросу")
+                    logger.debug(f"Признак '{feature_name}' соответствует запросу")
                     return True
                 else:
-                    logger.info(f"Признак '{feature_name}' не соответствует запросу")
+                    logger.debug(f"Признак '{feature_name}' не соответствует запросу")
                     return False
         except Exception as e:
-            logger.error(f"Ошибка проверки соответствия признака: {e}")
+            logger.error(f"Ошибка проверки соответствия признака '{feature_name}': {e}")
             # В случае ошибки считаем, что признак не соответствует
             return False
     
