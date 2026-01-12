@@ -5,19 +5,35 @@ import QueryForm from './components/QueryForm';
 import ResultsDisplay from './components/ResultsDisplay';
 import MapDisplay from './components/MapDisplay';
 import VideoAvatar from './components/VideoAvatar';
+import useLocalStorage from './hooks/useLocalStorage';
 
 // API URL - для разработки используйте полный URL, для продакшена - относительный путь
 const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
 
+// Ключи для localStorage
+const STORAGE_KEYS = {
+  ANSWER: 'rag_app_answer',
+  COORDINATES: 'rag_app_coordinates',
+  RESULTS_COUNT: 'rag_app_results_count',
+  USER_QUERY: 'rag_app_user_query',
+  HAS_COORDINATES: 'rag_app_has_coordinates',
+  VIDEO_PANEL_SIZE: 'rag_app_video_panel_size',
+};
+
 function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [answer, setAnswer] = useState('');
-  const [coordinates, setCoordinates] = useState([]);
-  const [resultsCount, setResultsCount] = useState(0);
-  const [userQuery, setUserQuery] = useState('');
-  const [hasCoordinates, setHasCoordinates] = useState(false);
-  const [videoPanelSize, setVideoPanelSize] = useState(55);
+  const [progressStep, setProgressStep] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
+  const [progressDetails, setProgressDetails] = useState(null);
+  
+  // Используем localStorage для сохранения состояния
+  const [answer, setAnswer] = useLocalStorage(STORAGE_KEYS.ANSWER, '');
+  const [coordinates, setCoordinates] = useLocalStorage(STORAGE_KEYS.COORDINATES, []);
+  const [resultsCount, setResultsCount] = useLocalStorage(STORAGE_KEYS.RESULTS_COUNT, 0);
+  const [userQuery, setUserQuery] = useLocalStorage(STORAGE_KEYS.USER_QUERY, '');
+  const [hasCoordinates, setHasCoordinates] = useLocalStorage(STORAGE_KEYS.HAS_COORDINATES, false);
+  const [videoPanelSize, setVideoPanelSize] = useLocalStorage(STORAGE_KEYS.VIDEO_PANEL_SIZE, 55);
   const separatorRef = useRef(null);
   const videoPanelRef = useRef(null);
   const resultsPanelRef = useRef(null);
@@ -48,7 +64,7 @@ function App() {
     const deltaPercent = (deltaY / containerHeight) * 100;
     
     const newSize = Math.max(30, Math.min(70, startSizeRef.current + deltaPercent));
-    setVideoPanelSize(newSize);
+    setVideoPanelSize(newSize); // Автоматически сохранится в localStorage через хук
   }, []);
 
   const handleMouseUp = useCallback(() => {
@@ -74,24 +90,20 @@ function App() {
   const handleQuerySubmit = async (userQuery) => {
     setIsLoading(true);
     setProgress(0);
+    setProgressStep(0);
+    setProgressMessage('');
+    setProgressDetails(null);
     setAnswer('');
     setCoordinates([]);
     setResultsCount(0);
     setUserQuery(userQuery);
     setHasCoordinates(false);
 
-    try {
-      // Симуляция прогресса
-      const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 500);
+    let requestId = null;
+    let progressInterval = null;
 
+    try {
+      // Отправляем запрос
       const response = await fetch(`${API_BASE_URL}/query/`, {
         method: 'POST',
         headers: {
@@ -100,38 +112,74 @@ function App() {
         body: JSON.stringify({ query: userQuery }),
       });
 
-      clearInterval(progressInterval);
-      setProgress(100);
-
-      console.log('Ответ получен, status:', response.status, response.statusText);
-
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Ошибка ответа:', response.status, errorText);
-        throw new Error(`Ошибка ${response.status}: ${errorText}`);
+        throw new Error(`Ошибка ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
-      console.log('Данные получены:', {
-        hasAnswer: !!data.answer,
-        answerLength: data.answer?.length || 0,
-        coordinatesCount: data.coordinates?.length || 0,
-        resultsCount: data.results_count || 0,
-        hasCoordinates: data.has_coordinates || false
-      });
-      
-      setAnswer(data.answer || '');
-      setCoordinates(data.coordinates || []);
-      setResultsCount(data.results_count || 0);
-      setHasCoordinates(data.has_coordinates || false);
-      
-      console.log('State установлен, answer:', data.answer ? 'есть' : 'нет');
+      requestId = data.request_id;
+
+      if (!requestId) {
+        throw new Error('Не получен request_id от сервера');
+      }
+
+      // Начинаем polling прогресса
+      progressInterval = setInterval(async () => {
+        try {
+          const progressResponse = await fetch(`${API_BASE_URL}/query/progress/?request_id=${requestId}`);
+          
+          if (!progressResponse.ok) {
+            console.error('Ошибка получения прогресса:', progressResponse.status);
+            return;
+          }
+
+          const progressData = await progressResponse.json();
+
+          // Обновляем прогресс
+          if (progressData.progress !== undefined) {
+            setProgress(progressData.progress);
+          }
+          if (progressData.step !== undefined) {
+            setProgressStep(progressData.step);
+          }
+          if (progressData.message !== undefined) {
+            setProgressMessage(progressData.message);
+          }
+          if (progressData.details !== undefined) {
+            setProgressDetails(progressData.details);
+          }
+
+          // Если запрос завершен
+          if (progressData.status === 'completed' && progressData.result) {
+            clearInterval(progressInterval);
+            // Сохраняем результаты в состояние (автоматически сохранится в localStorage через хук)
+            setAnswer(progressData.result.answer || '');
+            setCoordinates(progressData.result.coordinates || []);
+            setResultsCount(progressData.result.results_count || 0);
+            setHasCoordinates(progressData.result.has_coordinates || false);
+            setProgress(100);
+            setProgressStep(6);
+            setProgressMessage('Запрос выполнен успешно');
+            setIsLoading(false);
+          } else if (progressData.status === 'error') {
+            clearInterval(progressInterval);
+            setAnswer(`Ошибка: ${progressData.error || 'Неизвестная ошибка'}`);
+            setProgressMessage(`Ошибка: ${progressData.error || 'Неизвестная ошибка'}`);
+            setIsLoading(false);
+          }
+        } catch (pollError) {
+          console.error('Ошибка при получении прогресса:', pollError);
+        }
+      }, 500); // Polling каждые 500ms
+
     } catch (error) {
       console.error('Ошибка при обработке запроса:', error);
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
       setAnswer(`Ошибка: ${error.message}`);
-    } finally {
+      setProgressMessage(`Ошибка: ${error.message}`);
       setIsLoading(false);
-      setTimeout(() => setProgress(0), 500);
     }
   };
 
@@ -199,6 +247,9 @@ function App() {
                   onSubmit={handleQuerySubmit} 
                   isLoading={isLoading}
                   progress={progress}
+                  progressStep={progressStep}
+                  progressMessage={progressMessage}
+                  progressDetails={progressDetails}
                 />
               </div>
             </div>

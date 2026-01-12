@@ -9,6 +9,8 @@ app_name = 'rag_api'
 
 urlpatterns = [
     path('query/', views.QueryView.as_view(), name='query'),
+    path('query/progress/', views.QueryProgressView.as_view(), name='query_progress'),
+    path('query/stream/', views.QueryStreamView.as_view(), name='query_stream'),
     path('heygen/prepare-text/', views.HeyGenPrepareTextView.as_view(), name='heygen_prepare_text'),
     path('heygen/status/', views.HeyGenStatusView.as_view(), name='heygen_status'),
     path('heygen/streaming-token/', views.HeyGenStreamingTokenView.as_view(), name='heygen_streaming_token'),

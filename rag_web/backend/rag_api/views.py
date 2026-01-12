@@ -5,13 +5,17 @@ Django API views для RAG системы.
 import logging
 import json
 import requests
-from django.http import JsonResponse
+import pandas as pd
+from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.utils.decorators import method_decorator
 from django.views import View
 import sys
 import os
+import threading
+import queue
+import time
 
 # Добавляем путь к корневому каталогу проекта
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -34,6 +38,9 @@ GIGACHAT_CREDENTIALS = "MDE5OWUyNTAtNGNhZS03ZDdjLTg2ZmMtZjM5NDE0ZGFhNjUzOmYzMTk3
 
 # Глобальный экземпляр RAG системы (инициализируется при первом запросе)
 _rag_system = None
+
+# Глобальное хранилище прогресса для каждого запроса
+_progress_storage = {}
 
 
 def get_rag_system():
@@ -73,12 +80,137 @@ def get_rag_system():
 
 
 
+def _send_progress_event(progress_storage, step, progress, message, details=None):
+    """Обновление прогресса в хранилище."""
+    if progress_storage:
+        progress_storage['step'] = step
+        progress_storage['progress'] = progress
+        progress_storage['message'] = message
+        progress_storage['details'] = details or {}
+        logger.info(f"Обновление прогресса: step={step}, progress={progress}%, message={message[:50] if message else ''}")
+
+
+def _rag_query_with_progress(rag_system, user_query, progress_storage, top_k=20):
+    """
+    Выполнение RAG запроса с отправкой прогресса.
+    
+    Шаги:
+    1. Генерация описания признака/запроса (0-20%)
+    2. Поиск в OpenSearch (20-40%)
+    3. Проверка признаков (40-60%)
+    4. Генерация и выполнение SQL запросов (60-85%)
+    5. Генерация финального ответа (85-100%)
+    """
+    try:
+        # Шаг 1: Генерация описания признака/запроса (0-20%)
+        _send_progress_event(progress_storage, 1, 5, "ШАГ 1: Генерация описания признака/запроса...")
+        feature_description = rag_system.generate_feature_description(user_query)
+        _send_progress_event(progress_storage, 1, 20, f"Описание сгенерировано: {feature_description[:50]}...")
+        
+        # Шаг 2: Поиск в OpenSearch (20-40%)
+        _send_progress_event(progress_storage, 2, 25, f"ШАГ 2: Поиск в OpenSearch (топ-{top_k})...")
+        search_results = rag_system.search_in_opensearch(feature_description, top_k=top_k)
+        
+        if not search_results:
+            _send_progress_event(progress_storage, 2, 40, "Не найдено результатов в OpenSearch", {'found': 0})
+            return pd.DataFrame(), "К сожалению, по вашему запросу не найдено релевантных признаков в базе."
+        
+        _send_progress_event(progress_storage, 2, 40, f"Найдено {len(search_results)} результатов в OpenSearch", {'found': len(search_results)})
+        
+        # Шаг 3: Проверка признаков (40-60%)
+        _send_progress_event(progress_storage, 3, 45, f"ШАГ 3: Проверка {len(search_results)} признаков...")
+        matched_features = []
+        
+        for idx, doc in enumerate(search_results):
+            feature_name = doc.metadata.get('feature_name', '')
+            if not feature_name:
+                feature_name = doc.metadata.get('name', '')
+            if not feature_name:
+                text = doc.page_content or ""
+                parts = text.split('\n')
+                for part in parts[:3]:
+                    part = part.strip()
+                    if part and len(part) < 100:
+                        feature_name = part
+                        break
+            
+            feature_desc = doc.page_content if doc.page_content else ""
+            if not feature_desc:
+                feature_desc = doc.metadata.get('description', '')
+            feature_desc = feature_desc[:1000] if feature_desc else ""
+            
+            if not feature_name:
+                continue
+            
+            # Прогресс проверки каждого признака
+            check_progress = 45 + int((idx + 1) / len(search_results) * 15)
+            _send_progress_event(progress_storage, 3, check_progress, f"Проверка признака {idx + 1}/{len(search_results)}: {feature_name[:30]}...")
+            
+            if rag_system.check_feature_match(user_query, feature_name, feature_desc):
+                matched_features.append({
+                    'feature_name': feature_name,
+                    'description': feature_desc,
+                    'doc': doc
+                })
+        
+        if not matched_features:
+            _send_progress_event(progress_storage, 3, 60, "Не найдено признаков, соответствующих запросу")
+            return pd.DataFrame(), "К сожалению, не найдено признаков, соответствующих вашему запросу."
+        
+        _send_progress_event(progress_storage, 3, 60, f"Найдено {len(matched_features)} соответствующих признаков", {'matched': len(matched_features)})
+        
+        # Шаг 4: Генерация и выполнение SQL запросов (60-85%)
+        _send_progress_event(progress_storage, 4, 65, "ШАГ 4: Генерация и выполнение SQL запросов...")
+        all_results = []
+        
+        for idx, feature_info in enumerate(matched_features):
+            feature_name = feature_info['feature_name']
+            feature_desc = feature_info['description']
+            
+            sql_progress = 65 + int((idx + 1) / len(matched_features) * 20)
+            _send_progress_event(progress_storage, 4, sql_progress, f"Генерация SQL для признака {idx + 1}/{len(matched_features)}: {feature_name[:30]}...")
+            
+            sql_query = rag_system.generate_sql_query(user_query, feature_name, feature_desc)
+            
+            if sql_query:
+                _send_progress_event(progress_storage, 4, sql_progress + 2, f"Выполнение SQL запроса для {feature_name[:30]}...")
+                result_df = rag_system.execute_sql_query(sql_query)
+                
+                if not result_df.empty:
+                    result_df['matched_feature'] = feature_name
+                    all_results.append(result_df)
+                    _send_progress_event(progress_storage, 4, sql_progress + 4, f"Для признака '{feature_name}' найдено {len(result_df)} записей", {'records': len(result_df)})
+        
+        if all_results:
+            combined_results = pd.concat(all_results, ignore_index=True)
+            _send_progress_event(progress_storage, 4, 85, f"Всего найдено {len(combined_results)} записей", {'total_records': len(combined_results)})
+        else:
+            combined_results = pd.DataFrame()
+            _send_progress_event(progress_storage, 4, 85, "SQL запросы не вернули результатов")
+        
+        # Шаг 5: Генерация финального ответа (85-100%)
+        _send_progress_event(progress_storage, 5, 90, "ШАГ 5: Генерация финального ответа преподавателя...")
+        final_answer = rag_system.generate_final_summary(user_query, combined_results)
+        _send_progress_event(progress_storage, 5, 100, "Ответ сгенерирован", {'answer_length': len(final_answer)})
+        
+        return combined_results, final_answer
+        
+    except Exception as e:
+        logger.error(f"Ошибка в _rag_query_with_progress: {e}", exc_info=True)
+        if progress_storage:
+            _send_progress_event(progress_storage, 0, 0, f"Ошибка: {str(e)}", {'error': str(e)})
+        raise
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class QueryView(View):
-    """API endpoint для обработки запросов пользователя."""
+    """API endpoint для обработки запросов пользователя с отслеживанием прогресса."""
     
     def post(self, request):
         """Обработка POST запроса с вопросом пользователя."""
+        import uuid
+        import threading
+        
         try:
             data = json.loads(request.body)
             user_query = data.get('query', '').strip()
@@ -90,33 +222,200 @@ class QueryView(View):
             
             logger.info(f"Получен запрос: {user_query}")
             
+            # Создаем уникальный ID для этого запроса
+            request_id = str(uuid.uuid4())
+            
+            # Инициализируем прогресс
+            _progress_storage[request_id] = {
+                'step': 0,
+                'progress': 0,
+                'message': 'Инициализация...',
+                'details': {},
+                'status': 'processing',
+                'result': None,
+                'error': None
+            }
+            
             # Получаем RAG систему
             rag_system = get_rag_system()
             
-            # Выполняем запрос
-            results_df, answer = rag_system.query(user_query=user_query, top_k=20)
+            # Запускаем запрос в отдельном потоке
+            def run_query():
+                try:
+                    results_df, answer = _rag_query_with_progress(
+                        rag_system, 
+                        user_query, 
+                        _progress_storage[request_id], 
+                        top_k=20
+                    )
+                    
+                    # Извлекаем координаты
+                    coordinates = rag_system.extract_coordinates(results_df)
+                    has_coordinates = len(coordinates) > 0
+                    
+                    # Сохраняем результат
+                    _progress_storage[request_id]['result'] = {
+                        'answer': answer,
+                        'coordinates': coordinates,
+                        'results_count': len(results_df) if not results_df.empty else 0,
+                        'has_coordinates': has_coordinates
+                    }
+                    _progress_storage[request_id]['status'] = 'completed'
+                    _progress_storage[request_id]['progress'] = 100
+                    _progress_storage[request_id]['step'] = 6
+                    _progress_storage[request_id]['message'] = 'Запрос выполнен успешно'
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка выполнения запроса: {e}", exc_info=True)
+                    _progress_storage[request_id]['status'] = 'error'
+                    _progress_storage[request_id]['error'] = str(e)
             
-            # Извлекаем координаты
-            coordinates = rag_system.extract_coordinates(results_df)
-            has_coordinates = len(coordinates) > 0
+            thread = threading.Thread(target=run_query)
+            thread.start()
             
-            # Формируем ответ
-            response_data = {
-                'answer': answer,
-                'coordinates': coordinates,
-                'results_count': len(results_df) if not results_df.empty else 0,
-                'has_coordinates': has_coordinates
-            }
-            
-            logger.info(f"Запрос обработан: найдено {len(coordinates)} координат, {len(results_df)} результатов")
-            
-            return JsonResponse(response_data)
+            # Возвращаем ID запроса для отслеживания прогресса
+            return JsonResponse({
+                'request_id': request_id,
+                'status': 'started'
+            })
             
         except Exception as e:
             logger.error(f"Ошибка обработки запроса: {e}", exc_info=True)
             return JsonResponse({
                 'error': f'Ошибка обработки запроса: {str(e)}'
             }, status=500)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class QueryProgressView(View):
+    """API endpoint для получения прогресса выполнения запроса."""
+    
+    def get(self, request):
+        """Получение текущего прогресса запроса."""
+        request_id = request.GET.get('request_id')
+        
+        if not request_id:
+            return JsonResponse({
+                'error': 'request_id обязателен'
+            }, status=400)
+        
+        if request_id not in _progress_storage:
+            return JsonResponse({
+                'error': 'Запрос не найден'
+            }, status=404)
+        
+        progress_data = _progress_storage[request_id].copy()
+        
+        # Если запрос завершен, удаляем его из хранилища через некоторое время
+        if progress_data['status'] in ['completed', 'error']:
+            # Удаляем через 30 секунд после завершения
+            import threading
+            def cleanup():
+                import time
+                time.sleep(30)
+                if request_id in _progress_storage:
+                    del _progress_storage[request_id]
+            threading.Thread(target=cleanup, daemon=True).start()
+        
+        return JsonResponse(progress_data)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class QueryStreamView(View):
+    """API endpoint для обработки запросов с SSE (Server-Sent Events) для прогресса."""
+    
+    def post(self, request):
+        """Обработка POST запроса с отправкой прогресса через SSE."""
+        def event_stream():
+            try:
+                data = json.loads(request.body)
+                user_query = data.get('query', '').strip()
+                
+                if not user_query:
+                    yield f"data: {json.dumps({'error': 'Запрос не может быть пустым'})}\n\n"
+                    return
+                
+                logger.info(f"Получен запрос (SSE): {user_query}")
+                
+                # Создаем очередь для прогресса
+                progress_queue = queue.Queue()
+                
+                # Получаем RAG систему
+                rag_system = get_rag_system()
+                
+                # Запускаем запрос в отдельном потоке
+                results_df = None
+                answer = None
+                error = None
+                
+                def run_query():
+                    nonlocal results_df, answer, error
+                    try:
+                        results_df, answer = _rag_query_with_progress(rag_system, user_query, progress_queue, top_k=20)
+                    except Exception as e:
+                        error = str(e)
+                        logger.error(f"Ошибка выполнения запроса: {e}", exc_info=True)
+                
+                query_thread = threading.Thread(target=run_query)
+                query_thread.start()
+                
+                # Отправляем события прогресса
+                logger.info("Начало отправки событий прогресса...")
+                events_sent = 0
+                while query_thread.is_alive() or not progress_queue.empty():
+                    try:
+                        # Получаем событие из очереди с таймаутом
+                        event = progress_queue.get(timeout=0.1)
+                        events_sent += 1
+                        event_str = f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        logger.info(f"[{events_sent}] Отправка события прогресса: step={event.get('step')}, progress={event.get('progress')}%, message={event.get('message')[:50] if event.get('message') else ''}")
+                        yield event_str
+                        # Принудительно отправляем данные (для некоторых серверов)
+                        import sys
+                        sys.stdout.flush()
+                    except queue.Empty:
+                        # Проверяем, жив ли поток
+                        if not query_thread.is_alive():
+                            logger.info(f"Поток завершен. Всего отправлено событий: {events_sent}")
+                            break
+                        continue
+                
+                logger.info(f"Завершение отправки событий. Всего отправлено: {events_sent}")
+                
+                # Ждем завершения потока
+                query_thread.join()
+                
+                # Отправляем финальный результат
+                if error:
+                    yield f"data: {json.dumps({'error': error, 'step': 0, 'progress': 0})}\n\n"
+                else:
+                    # Извлекаем координаты
+                    coordinates = rag_system.extract_coordinates(results_df)
+                    has_coordinates = len(coordinates) > 0
+                    
+                    final_result = {
+                        'step': 6,
+                        'progress': 100,
+                        'message': 'Запрос выполнен успешно',
+                        'result': {
+                            'answer': answer,
+                            'coordinates': coordinates,
+                            'results_count': len(results_df) if not results_df.empty else 0,
+                            'has_coordinates': has_coordinates
+                        }
+                    }
+                    yield f"data: {json.dumps(final_result)}\n\n"
+                    
+            except Exception as e:
+                logger.error(f"Ошибка в event_stream: {e}", exc_info=True)
+                yield f"data: {json.dumps({'error': str(e), 'step': 0, 'progress': 0})}\n\n"
+        
+        response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+        response['Cache-Control'] = 'no-cache'
+        response['X-Accel-Buffering'] = 'no'
+        # Отключаем буферизацию для мгновенной отправки
+        # Примечание: Connection header нельзя устанавливать в WSGI, это hop-by-hop header
+        return response
 
 
 def prepare_video_text(full_answer: str, has_coordinates: bool = False, user_query: str = '') -> str:

@@ -4,6 +4,29 @@ import './MapDisplay.css';
 function MapDisplay({ coordinates }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
+  const containerRef = useRef(null);
+
+  // Функция для обновления размера карты
+  const updateMapSize = () => {
+    if (mapInstanceRef.current && mapRef.current) {
+      try {
+        // Обновляем размер карты через container
+        const container = mapInstanceRef.current.container;
+        if (container && container.fitToViewport) {
+          container.fitToViewport();
+        } else {
+          // Альтернативный способ - принудительное обновление через изменение размера
+          const width = mapRef.current.offsetWidth;
+          const height = mapRef.current.offsetHeight;
+          if (width > 0 && height > 0) {
+            mapInstanceRef.current.container.setSize([width, height]);
+          }
+        }
+      } catch (error) {
+        console.error('Ошибка обновления размера карты:', error);
+      }
+    }
+  };
 
   useEffect(() => {
     if (!coordinates || coordinates.length === 0) return;
@@ -48,6 +71,11 @@ function MapDisplay({ coordinates }) {
           }
 
           mapInstanceRef.current = map;
+          
+          // Обновляем размер после небольшой задержки для корректной инициализации
+          setTimeout(() => {
+            updateMapSize();
+          }, 100);
         });
       } else if (window.ymaps) {
         // Если ymaps уже загружен, но ready не доступен
@@ -85,6 +113,10 @@ function MapDisplay({ coordinates }) {
           }
 
           mapInstanceRef.current = map;
+          
+          setTimeout(() => {
+            updateMapSize();
+          }, 100);
         } catch (error) {
           console.error('Ошибка создания карты:', error);
         }
@@ -122,12 +154,41 @@ function MapDisplay({ coordinates }) {
     };
   }, [coordinates]);
 
+  // Обработчик изменения размера контейнера
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Используем ResizeObserver для отслеживания изменения размера
+    const resizeObserver = new ResizeObserver(() => {
+      // Небольшая задержка для корректного обновления
+      setTimeout(() => {
+        updateMapSize();
+      }, 50);
+    });
+
+    resizeObserver.observe(containerRef.current);
+
+    // Также слушаем изменения размера окна
+    const handleResize = () => {
+      setTimeout(() => {
+        updateMapSize();
+      }, 50);
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
   if (!coordinates || coordinates.length === 0) {
     return null;
   }
 
   return (
-    <div className="map-container">
+    <div className="map-container" ref={containerRef}>
       <div className="map-header">
         <h3>🗺️ Карта найденных мест</h3>
         <span className="markers-count">{coordinates.length} меток</span>

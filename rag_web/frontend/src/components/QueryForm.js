@@ -1,55 +1,56 @@
 import React, { useState } from 'react';
 import './QueryForm.css';
+import TqdmProgressBar from './TqdmProgressBar';
 
-function QueryForm({ onSubmit, isLoading, progress }) {
+function QueryForm({ 
+  onSubmit, 
+  isLoading, 
+  progress = 0, 
+  progressStep = 0,
+  progressMessage = '',
+  progressDetails = null
+}) {
   const [query, setQuery] = useState('');
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (query.trim() && !isLoading) {
-      onSubmit(query);
+      onSubmit(query.trim());
       setQuery('');
     }
   };
 
   return (
     <div className="query-form-container">
-      <form onSubmit={handleSubmit} className="query-form">
+      <form className="query-form" onSubmit={handleSubmit}>
         <div className="input-group">
           <textarea
             className="query-input"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Введите ваш вопрос о геологических данных Каспийского моря..."
-            rows="2"
+            placeholder="Введите ваш вопрос о геологических данных..."
             disabled={isLoading}
+            rows={3}
           />
-          <button 
-            type="submit" 
-            className="submit-button"
-            disabled={isLoading || !query.trim()}
-          >
-            {isLoading ? 'Обработка...' : 'Отправить запрос'}
-          </button>
+          {isLoading ? (
+            <TqdmProgressBar
+              progress={progress}
+              step={progressStep}
+              isVisible={isLoading}
+            />
+          ) : (
+            <button
+              type="submit"
+              className="submit-button"
+              disabled={!query.trim()}
+            >
+              Отправить запрос
+            </button>
+          )}
         </div>
       </form>
-
-      {isLoading && (
-        <div className="progress-container">
-          <div className="progress-bar">
-            <div 
-              className="progress-fill" 
-              style={{ width: `${progress}%` }}
-            >
-              <span className="progress-text">{progress}%</span>
-            </div>
-          </div>
-          <p className="progress-status">Обработка запроса...</p>
-        </div>
-      )}
     </div>
   );
 }
 
 export default QueryForm;
-

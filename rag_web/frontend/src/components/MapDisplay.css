@@ -9,6 +9,9 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
 }
 
 .map-header {
@@ -39,5 +42,14 @@
   min-height: 300px;
   border-radius: 15px;
   overflow: hidden;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Стили для контейнера карты Yandex */
+.yandex-map > div {
+  width: 100% !important;
+  height: 100% !important;
 }
 
