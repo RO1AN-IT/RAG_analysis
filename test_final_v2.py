@@ -13,6 +13,7 @@ RAG система через LangChain для поиска геологичес
 
 import logging
 import pandas as pd
+import time
 from typing import List, Dict, Optional, Tuple, Any
 from langchain_core.documents import Document
 from opensearchpy import OpenSearch
@@ -290,6 +291,45 @@ class RAGSystemLangChain:
             logger.error(f"Ошибка загрузки документов из OpenSearch: {e}")
             raise
     
+    def _call_gigachat_with_retry(self, prompt: str, max_retries: int = 3, retry_delay: int = 2, operation_name: str = "операция"):
+        """
+        Вспомогательная функция для вызова GigaChat с retry логикой.
+        
+        Args:
+            prompt: Промпт для отправки в GigaChat
+            max_retries: Максимальное количество попыток
+            retry_delay: Задержка между попытками (в секундах)
+            operation_name: Название операции для логирования
+            
+        Returns:
+            Ответ от GigaChat или None в случае ошибки
+        """
+        for attempt in range(max_retries):
+            try:
+                with GigaChat(
+                    credentials=self.credentials,
+                    verify_ssl_certs=False,
+                    scope='GIGACHAT_API_B2B',
+                    model='GigaChat-2-Pro',
+                    timeout=120  # Увеличиваем таймаут до 120 секунд
+                ) as giga:
+                    response = giga.chat(prompt)
+                    return response.choices[0].message.content.strip()
+            except (TimeoutError, ConnectionError, OSError) as e:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    logger.warning(f"Таймаут/ошибка соединения при {operation_name} (попытка {attempt + 1}/{max_retries}). Повтор через {wait_time}с...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Ошибка {operation_name} после {max_retries} попыток: {e}")
+                    return None
+            except Exception as e:
+                logger.error(f"Ошибка {operation_name}: {e}")
+                return None
+        
+        return None
+    
     def generate_feature_description(self, user_query: str) -> str:
         """
         Генерация описания признака или общего описания запроса через GigaChat.
@@ -304,19 +344,11 @@ class RAGSystemLangChain:
         
         prompt = FEATURE_DESCRIPTION_PROMPT.format(user_query=user_query)
         
-        try:
-            with GigaChat(
-                credentials=self.credentials,
-                verify_ssl_certs=False,
-                scope='GIGACHAT_API_B2B',
-                model='GigaChat-2-Pro'
-            ) as giga:
-                response = giga.chat(prompt)
-                description = response.choices[0].message.content.strip()
-                logger.info(f"Сгенерировано описание: {description[:100]}...")
-                return description
-        except Exception as e:
-            logger.error(f"Ошибка генерации описания: {e}")
+        description = self._call_gigachat_with_retry(prompt, operation_name="генерации описания")
+        if description:
+            logger.info(f"Сгенерировано описание: {description[:100]}...")
+            return description
+        else:
             # Возвращаем исходный запрос как описание
             return user_query
     
@@ -484,26 +516,23 @@ class RAGSystemLangChain:
             feature_description=feature_description
         )
         
-        try:
-            with GigaChat(
-                credentials=self.credentials,
-                verify_ssl_certs=False,
-                scope='GIGACHAT_API_B2B',
-                model='GigaChat-2-Pro'
-            ) as giga:
-                response = giga.chat(prompt)
-                answer = response.choices[0].message.content.strip().upper()
-                
-                # Проверяем ответ
-                if "ДА" in answer or "YES" in answer:
-                    logger.debug(f"Признак '{feature_name}' соответствует запросу")
-                    return True
-                else:
-                    logger.debug(f"Признак '{feature_name}' не соответствует запросу")
-                    return False
-        except Exception as e:
-            logger.error(f"Ошибка проверки соответствия признака '{feature_name}': {e}")
+        answer = self._call_gigachat_with_retry(
+            prompt, 
+            operation_name=f"проверке признака '{feature_name}'"
+        )
+        
+        if answer:
+            answer = answer.upper()
+            # Проверяем ответ
+            if "ДА" in answer or "YES" in answer:
+                logger.debug(f"Признак '{feature_name}' соответствует запросу")
+                return True
+            else:
+                logger.debug(f"Признак '{feature_name}' не соответствует запросу")
+                return False
+        else:
             # В случае ошибки считаем, что признак не соответствует
+            logger.warning(f"Не удалось проверить признак '{feature_name}' из-за ошибки соединения")
             return False
     
     def get_columns_info(self) -> str:
@@ -593,66 +622,73 @@ class RAGSystemLangChain:
                         candidate_bindings=candidate_bindings_text
                     )
                 
-                with GigaChat(
-                    credentials=self.credentials,
-                    verify_ssl_certs=False,
-                    scope='GIGACHAT_API_B2B',
-                    model='GigaChat-2-Pro'
-                ) as giga:
-                    response = giga.chat(prompt)
-                    sql_query = response.choices[0].message.content.strip()
+                sql_query_raw = self._call_gigachat_with_retry(
+                    prompt,
+                    operation_name=f"генерации SQL для признака '{feature_name}' (попытка {attempt})"
+                )
+                
+                if not sql_query_raw:
+                    # Если не удалось сгенерировать SQL, продолжаем попытки
+                    if attempt < max_attempts:
+                        logger.warning(f"Не удалось сгенерировать SQL запрос (попытка {attempt}/{max_attempts})")
+                        continue
+                    else:
+                        logger.error(f"Не удалось сгенерировать SQL запрос после {max_attempts} попыток")
+                        return None
+                
+                sql_query = sql_query_raw.strip()
+                
+                # Очистка SQL запроса от markdown форматирования, если есть
+                if sql_query.startswith("```sql"):
+                    sql_query = sql_query[6:]
+                if sql_query.startswith("```"):
+                    sql_query = sql_query[3:]
+                if sql_query.endswith("```"):
+                    sql_query = sql_query[:-3]
+                sql_query = sql_query.strip()
+                
+                logger.info(f"Сгенерирован SQL запрос (попытка {attempt}): {sql_query[:100]}...")
+                
+                # Пробуем выполнить запрос для проверки
+                try:
+                    test_result = self.execute_sql_query(sql_query, test_mode=True)
                     
-                    # Очистка SQL запроса от markdown форматирования, если есть
-                    if sql_query.startswith("```sql"):
-                        sql_query = sql_query[6:]
-                    if sql_query.startswith("```"):
-                        sql_query = sql_query[3:]
-                    if sql_query.endswith("```"):
-                        sql_query = sql_query[:-3]
-                    sql_query = sql_query.strip()
-                    
-                    logger.info(f"Сгенерирован SQL запрос (попытка {attempt}): {sql_query[:100]}...")
-                    
-                    # Пробуем выполнить запрос для проверки
-                    try:
-                        test_result = self.execute_sql_query(sql_query, test_mode=True)
-                        
-                        if test_result is not None:
-                            # Запрос выполнился успешно
-                            logger.info(f"SQL запрос успешно проверен на попытке {attempt}")
-                            return sql_query
-                        else:
-                            # Запрос выполнился с ошибкой, продолжаем попытки
-                            if attempt < max_attempts:
-                                error_msg = str(self.last_sql_error) if hasattr(self, 'last_sql_error') else "Неизвестная ошибка"
-                                error_history.append(f"Попытка {attempt}: {error_msg}")
-                                # Сохраняем candidate bindings из текущей ошибки, если они есть
-                                if hasattr(self, 'last_candidate_bindings') and self.last_candidate_bindings:
-                                    all_candidate_bindings.extend(self.last_candidate_bindings)
-                                    error_history.append(f"Доступные колонки: {', '.join(self.last_candidate_bindings)}")
-                                logger.warning(f"SQL запрос выполнился с ошибкой: {error_msg[:200]}... Пробуем исправить (попытка {attempt}/{max_attempts})")
-                                continue
-                            else:
-                                logger.error(f"Не удалось сгенерировать корректный SQL запрос после {max_attempts} попыток")
-                                return None
-                    except Exception as test_error:
-                        # Ошибка при тестировании запроса
-                        self.last_sql_error = test_error
+                    if test_result is not None:
+                        # Запрос выполнился успешно
+                        logger.info(f"SQL запрос успешно проверен на попытке {attempt}")
+                        return sql_query
+                    else:
+                        # Запрос выполнился с ошибкой, продолжаем попытки
                         if attempt < max_attempts:
-                            error_msg = str(test_error)
+                            error_msg = str(self.last_sql_error) if hasattr(self, 'last_sql_error') else "Неизвестная ошибка"
                             error_history.append(f"Попытка {attempt}: {error_msg}")
-                            # Извлекаем candidate bindings из ошибки
-                            candidate_bindings = self._extract_candidate_bindings(error_msg)
-                            if candidate_bindings:
-                                self.last_candidate_bindings = candidate_bindings
-                                all_candidate_bindings.extend(candidate_bindings)
-                                error_history.append(f"Доступные колонки: {', '.join(candidate_bindings)}")
-                                logger.info(f"Найдены доступные колонки в ошибке: {candidate_bindings}")
-                            logger.warning(f"Ошибка при тестировании SQL запроса: {test_error}. Пробуем исправить (попытка {attempt}/{max_attempts})")
+                            # Сохраняем candidate bindings из текущей ошибки, если они есть
+                            if hasattr(self, 'last_candidate_bindings') and self.last_candidate_bindings:
+                                all_candidate_bindings.extend(self.last_candidate_bindings)
+                                error_history.append(f"Доступные колонки: {', '.join(self.last_candidate_bindings)}")
+                            logger.warning(f"SQL запрос выполнился с ошибкой: {error_msg[:200]}... Пробуем исправить (попытка {attempt}/{max_attempts})")
                             continue
                         else:
                             logger.error(f"Не удалось сгенерировать корректный SQL запрос после {max_attempts} попыток")
                             return None
+                except Exception as test_error:
+                    # Ошибка при тестировании запроса
+                    self.last_sql_error = test_error
+                    if attempt < max_attempts:
+                        error_msg = str(test_error)
+                        error_history.append(f"Попытка {attempt}: {error_msg}")
+                        # Извлекаем candidate bindings из ошибки
+                        candidate_bindings = self._extract_candidate_bindings(error_msg)
+                        if candidate_bindings:
+                            self.last_candidate_bindings = candidate_bindings
+                            all_candidate_bindings.extend(candidate_bindings)
+                            error_history.append(f"Доступные колонки: {', '.join(candidate_bindings)}")
+                            logger.info(f"Найдены доступные колонки в ошибке: {candidate_bindings}")
+                        logger.warning(f"Ошибка при тестировании SQL запроса: {test_error}. Пробуем исправить (попытка {attempt}/{max_attempts})")
+                        continue
+                    else:
+                        logger.error(f"Не удалось сгенерировать корректный SQL запрос после {max_attempts} попыток")
+                        return None
                             
             except Exception as e:
                 logger.error(f"Ошибка генерации SQL запроса на попытке {attempt}: {e}")
@@ -803,27 +839,20 @@ class RAGSystemLangChain:
             coordinates_section=coordinates_section
         )
         
-        try:
-            with GigaChat(
-                credentials=self.credentials,
-                verify_ssl_certs=False,
-                scope='GIGACHAT_API_B2B',
-                model='GigaChat-2-Pro'
-            ) as giga:
-                response = giga.chat(prompt)
-                summary = response.choices[0].message.content.strip()
-                
-                # Проверяем, что координаты включены в ответ
-                if coordinates_section and 'координат' not in summary.lower() and '📍' not in summary:
-                    logger.warning("Координаты не включены в ответ, добавляем принудительно")
-                    coords_text = "\n\n📍 КООРДИНАТЫ НАЙДЕННЫХ ЗАПИСЕЙ:\n" + "\n".join([line.replace("Запись ", "• ") for line in coordinates_list])
-                    summary += coords_text
-                
-                logger.info("Финальный ответ сгенерирован")
-                return summary
-        except Exception as e:
-            logger.error(f"Ошибка генерации финального ответа: {e}")
-            # Возвращаем базовый ответ с координатами
+        summary = self._call_gigachat_with_retry(prompt, operation_name="генерации финального ответа")
+        
+        if summary:
+            # Проверяем, что координаты включены в ответ
+            if coordinates_section and 'координат' not in summary.lower() and '📍' not in summary:
+                logger.warning("Координаты не включены в ответ, добавляем принудительно")
+                coords_text = "\n\n📍 КООРДИНАТЫ НАЙДЕННЫХ ЗАПИСЕЙ:\n" + "\n".join([line.replace("Запись ", "• ") for line in coordinates_list])
+                summary += coords_text
+            
+            logger.info("Финальный ответ сгенерирован")
+            return summary
+        else:
+            # В случае ошибки возвращаем базовый ответ
+            logger.error("Ошибка генерации финального ответа")
             if results_df.empty:
                 return "К сожалению, по вашему запросу данные в базе не найдены."
             else:
