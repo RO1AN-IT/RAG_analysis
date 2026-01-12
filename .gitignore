@@ -13,6 +13,7 @@ build/
 *.egg
 /Users/rodionduktanov/anaconda_projects/RAG_Caspian_Analysis/compare_databases.py
 
+
 # Django
 *.log
 db.sqlite3
@@ -68,6 +69,7 @@ rag_web/public_html/
 heygen_test/
 rubbish/
 opensearc_command/
+heygen_test/
 
 # Certificates and keys
 *.pem

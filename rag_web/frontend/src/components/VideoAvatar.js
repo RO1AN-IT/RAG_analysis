@@ -9,157 +9,92 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
   const videoRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [videoUrl, setVideoUrl] = useState(null);
   const [skipVideo, setSkipVideo] = useState(false);
-  const [videoId, setVideoId] = useState(null);
   const [status, setStatus] = useState(null);
-  const pollingIntervalRef = useRef(null);
   
   // Streaming режим (live)
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingSession, setStreamingSession] = useState(null);
   const [streamingToken, setStreamingToken] = useState(null);
+  const [streamingAvatarId, setStreamingAvatarId] = useState(null); // Avatar ID из сервера
   const [videoText, setVideoText] = useState(null); // Текст для озвучивания
   const [showVideo, setShowVideo] = useState(true); // Управление видимостью видео
   const peerConnectionRef = useRef(null);
   const streamingSessionRef = useRef(null);
   const streamingTokenRef = useRef(null);
+  const streamingAvatarIdRef = useRef(null); // Ref для avatar_id
   const isStreamingRef = useRef(false); // Ref для отслеживания состояния streaming
 
-  // Функция для проверки статуса видео (polling) - как в heygen_test
-  const checkVideoStatus = useCallback(async (id) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/heygen/status/?video_id=${id}`);
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Ошибка проверки статуса');
-      }
-      
-      setStatus(data.status || 'pending');
-      
-      // Обработка ошибки (как в heygen_test)
-      if (data.status === 'failed') {
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
-        }
-        const errMsg = data.raw?.data?.error?.message || data.raw?.data?.error?.detail || 'Генерация не удалась';
-        setError(errMsg);
-        setIsLoading(false);
-        setStatus('Ошибка генерации');
-        return true; // Процесс завершен с ошибкой
-      }
-      
-      // Видео готово
-      if (data.video_url) {
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
-        }
-        setVideoUrl(data.video_url);
-        setIsLoading(false);
-        setStatus('Готово!');
-        return true; // Видео готово
-      }
-      
-      return false; // Продолжаем polling
-    } catch (err) {
-      console.error('Ошибка проверки статуса:', err);
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
-      setError(err.message);
-      setIsLoading(false);
-      setStatus('');
-      return true; // Остановка polling при ошибке
-    }
-  }, []);
 
-  // Получение streaming токена (улучшенная версия)
+  // Получение streaming токена (точно как в heygen_test)
   const getStreamingToken = useCallback(async () => {
-    try {
-      console.log('Запрос streaming токена...');
-      const response = await fetch(`${API_BASE_URL}/heygen/streaming-token/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        const errorMsg = data.error || data.details || `Ошибка получения токена: ${response.status}`;
-        console.error('Ошибка получения токена:', errorMsg);
-        throw new Error(errorMsg);
-      }
-      
-      // Проверяем структуру ответа
-      const token = data.data?.token || data.token;
-      if (!token) {
-        console.error('Токен не найден в ответе:', data);
-        throw new Error('Токен не найден в ответе сервера');
-      }
-      
-      console.log('Streaming токен получен');
-      return token;
-    } catch (err) {
-      console.error('Ошибка получения streaming токена:', err);
-      throw err;
-    }
-  }, []);
-
-  // Создание streaming сессии (улучшенная версия)
-  const createStreamingSession = useCallback(async (token) => {
-    if (!token) {
-      throw new Error('Токен не предоставлен');
+    console.log('Получаем access token...');
+    const response = await fetch(`${API_BASE_URL}/heygen/streaming-token/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || `Token error: ${response.status}`);
     }
     
-    const avatarId = 'Katya_Chair_Sitting_public'; // Дефолтный Interactive Avatar ID (для streaming нужен Interactive Avatar)
+    console.log('Access token получен');
+    
+    // Сохраняем avatar_id из ответа (если есть)
+    const avatarId = data.data?.avatar_id || data.avatar_id;
+    if (avatarId) {
+      console.log('Avatar ID получен из сервера:', avatarId);
+      setStreamingAvatarId(avatarId);
+      streamingAvatarIdRef.current = avatarId;
+    }
+    
+    return data.data.token;
+  }, []);
+
+  // Создание streaming сессии (точно как в heygen_test)
+  const createStreamingSession = useCallback(async (token) => {
+    // Используем avatar_id из сервера или fallback на дефолтный
+    const avatarId = streamingAvatarIdRef.current || streamingAvatarId || 'Katya_Chair_Sitting_public';
+    
+    if (!avatarId) {
+      throw new Error('Введите Avatar ID');
+    }
+    
     const payload = {
       quality: 'medium',
-      avatar_id: avatarId,
     };
-    
-    console.log('Создание streaming сессии с payload:', payload);
-    
-    try {
-      const response = await fetch(`${HEYGEN_API_BASE}/v1/streaming.new`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-      
-      const data = await response.json();
-      console.log('Ответ создания сессии:', data);
-      
-      if (!response.ok) {
-        const errorMsg = data.error?.message || data.message || data.error || `Ошибка создания сессии: ${response.status}`;
-        console.error('Ошибка создания сессии:', errorMsg);
-        throw new Error(errorMsg);
-      }
-      
-      // Проверяем структуру ответа
-      const sessionData = data.data || data;
-      if (!sessionData.session_id) {
-        console.error('session_id не найден в ответе:', data);
-        throw new Error('session_id не найден в ответе сервера');
-      }
-      
-      console.log('Сессия создана:', sessionData.session_id);
-      return sessionData;
-    } catch (err) {
-      console.error('Ошибка в createStreamingSession:', err);
-      throw err;
+    if (avatarId) {
+      payload.avatar_id = avatarId;  // Use avatar_id for interactive avatars
     }
-  }, []);
+    
+    console.log(`Payload: ${JSON.stringify(payload)}`);
+    
+    const response = await fetch(`${HEYGEN_API_BASE}/v1/streaming.new`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    
+    const data = await response.json();
+    console.log('Session response:', data);
+    
+    if (!response.ok) {
+      const errMsg = data.error?.message || data.message || JSON.stringify(data);
+      console.error(`Детали ошибки: ${errMsg}`);
+      throw new Error(`Session error: ${response.status} - ${errMsg}`);
+    }
+    
+    console.log(`Сессия создана: ${data.data.session_id}`);
+    return data.data;
+  }, [streamingAvatarId]);
 
-  // Настройка WebRTC соединения (улучшенная версия из heygen_test)
+  // Настройка WebRTC соединения (точно как в heygen_test)
   const startWebRTC = useCallback(async (session, token) => {
     const peerConnection = new RTCPeerConnection({
       iceServers: session.ice_servers || [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -171,198 +106,154 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     peerConnection.ontrack = (event) => {
       console.log(`Получен ${event.track.kind} трек`);
       
-      // Устанавливаем поток в video элемент (только один раз) - точно как в heygen_test
-      if (event.streams && event.streams[0] && videoRef.current) {
-        // Устанавливаем srcObject (даже если уже установлен, обновляем для надежности)
-        if (!videoRef.current.srcObject) {
-          console.log('Установка srcObject для видео элемента...');
-          videoRef.current.srcObject = event.streams[0];
-          console.log('srcObject установлен, поток:', event.streams[0]);
-          console.log('Активные треки в потоке:', event.streams[0].getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState })));
-        }
-        // Скрываем placeholder при получении потока (всегда обновляем состояние)
-        setHasVideoStream(true);
-        console.log('hasVideoStream установлен в true');
+      // Set stream to video element (only once) - точно как в heygen_test
+      if (event.streams && event.streams[0] && !videoRef.current.srcObject) {
+        videoRef.current.srcObject = event.streams[0];
+        setHasVideoStream(true); // Скрываем placeholder
       }
       
-      // Запускаем воспроизведение только один раз, когда есть оба трека (точно как в heygen_test)
+      // Start playback only once when we have both tracks - точно как в heygen_test
       if (!playStarted && videoRef.current && videoRef.current.srcObject) {
         playStarted = true;
-        console.log('Оба трека получены, запуск воспроизведения...');
-        // Небольшая задержка, чтобы оба трека успели подключиться
+        // Small delay to let both tracks attach
         setTimeout(() => {
           if (videoRef.current && videoRef.current.srcObject) {
-            console.log('Попытка запустить воспроизведение...');
             videoRef.current.play().then(() => {
-              console.log('Видео воспроизводится успешно');
+              console.log('Видео воспроизводится');
               if (videoRef.current) {
                 videoRef.current.muted = false;
-                console.log('Звук включен, video.readyState:', videoRef.current.readyState);
               }
             }).catch(err => {
-              console.error('Ошибка воспроизведения:', err);
+              console.error('Play error:', err);
               setStatus('Кликните на видео для воспроизведения');
-              setError('Кликните на видео для воспроизведения (автозапуск заблокирован браузером)');
             });
-          } else {
-            console.error('videoRef.current или srcObject отсутствует при попытке воспроизведения');
           }
         }, 200);
       }
     };
 
-    // Обработчик ICE кандидатов
+    // Обработчик ICE кандидатов (точно как в heygen_test)
     peerConnection.onicecandidate = async (event) => {
-      if (event.candidate && session.session_id) {
-        try {
-          await fetch(`${HEYGEN_API_BASE}/v1/streaming.ice`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              session_id: session.session_id,
-              candidate: event.candidate,
-            }),
-          });
-        } catch (err) {
-          console.error('Ошибка отправки ICE кандидата:', err);
-        }
+      if (event.candidate) {
+        await fetch(`${HEYGEN_API_BASE}/v1/streaming.ice`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            session_id: session.session_id,
+            candidate: event.candidate,
+          }),
+        });
       }
     };
 
-    // Обработчик ошибок подключения
+    // Обработчик ошибок подключения (опционально, не в heygen_test, но полезно)
     peerConnection.onconnectionstatechange = () => {
       console.log('WebRTC connection state:', peerConnection.connectionState);
-      if (peerConnection.connectionState === 'failed') {
-        setError('Ошибка подключения WebRTC');
-        setStatus('Ошибка подключения');
-      }
     };
 
-    try {
-      // Устанавливаем remote SDP
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(session.sdp));
-      
-      // Создаем answer
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
+    // Set remote SDP - точно как в heygen_test
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(session.sdp));
+    
+    // Create answer - точно как в heygen_test
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
 
-      // Отправляем answer на сервер
-      await fetch(`${HEYGEN_API_BASE}/v1/streaming.start`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          session_id: session.session_id,
-          sdp: answer,
-        }),
-      });
+    // Send answer to server - точно как в heygen_test
+    await fetch(`${HEYGEN_API_BASE}/v1/streaming.start`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        session_id: session.session_id,
+        sdp: answer,
+      }),
+    });
 
-      console.log('WebRTC подключено!');
-      return peerConnection;
-    } catch (err) {
-      console.error('Ошибка настройки WebRTC:', err);
-      throw err;
-    }
+    console.log('WebRTC подключено!');
+    return peerConnection;
   }, []);
 
-  // Отправка текста для озвучивания (улучшенная версия)
+  // Отправка текста для озвучивания (точно как в heygen_test)
   const speakText = useCallback(async (text, session, token) => {
-    if (!text || !text.trim()) {
-      throw new Error('Текст для озвучивания пуст');
-    }
+    if (!session || !token) return;
     
-    if (!session || !session.session_id) {
-      throw new Error('Сессия не создана');
-    }
+    console.log(`Отправляем текст: "${text.substring(0, 50)}..."`);
     
     // Для Interactive Avatar voice_id может быть undefined - используется голос по умолчанию аватара
-    const voiceId = undefined; // Interactive Avatar использует свой голос по умолчанию
-    console.log(`Отправка текста для озвучивания (${text.length} символов})`);
+    const voiceId = undefined;
+    
+    const response = await fetch(`${HEYGEN_API_BASE}/v1/streaming.task`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        session_id: session.session_id,
+        text: text.trim(),
+        voice_id: voiceId || undefined,
+        task_type: 'repeat',
+      }),
+    });
+    
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error?.message || `Speak error: ${response.status}`);
+    }
+    
+    console.log('Текст отправлен, аватар говорит...');
+  }, []);
+
+  // Остановка streaming сессии (точно как в heygen_test)
+  const stopStreaming = useCallback(async () => {
+    const currentSession = streamingSessionRef.current;
+    const currentToken = streamingTokenRef.current;
+    
+    if (!currentSession) return;
+    
+    console.log('Закрываем сессию...');
     
     try {
-      const response = await fetch(`${HEYGEN_API_BASE}/v1/streaming.task`, {
+      await fetch(`${HEYGEN_API_BASE}/v1/streaming.stop`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${currentToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          session_id: session.session_id,
-          text: text.trim(),
-          voice_id: voiceId || undefined, // Опционально - если undefined, используется голос по умолчанию аватара
-          task_type: 'repeat',
+          session_id: currentSession.session_id,
         }),
       });
-
-      if (!response.ok) {
-        const err = await response.json();
-        const errorMsg = err.error?.message || err.message || `Ошибка озвучивания: ${response.status}`;
-        console.error('Ошибка отправки текста:', errorMsg);
-        throw new Error(errorMsg);
-      }
-      
-      console.log('Текст успешно отправлен для озвучивания');
-    } catch (err) {
-      console.error('Ошибка в speakText:', err);
-      throw err;
+    } catch (e) {
+      console.error(e);
     }
-  }, []);
-
-  // Остановка streaming сессии (улучшенная версия)
-  // Используем refs для доступа к текущим значениям без зависимостей
-  const stopStreaming = useCallback(async () => {
-    console.log('Остановка streaming сессии...');
     
-    // Закрываем WebRTC соединение
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
     
-    // Останавливаем сессию на сервере (используем refs для получения текущих значений)
-    const currentSession = streamingSessionRef.current;
-    const currentToken = streamingTokenRef.current;
-    
-    if (currentSession && currentSession.session_id && currentToken) {
-      try {
-        await fetch(`${HEYGEN_API_BASE}/v1/streaming.stop`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${currentToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            session_id: currentSession.session_id,
-          }),
-        });
-        console.log('Сессия остановлена на сервере');
-      } catch (e) {
-        console.error('Ошибка остановки сессии:', e);
-      }
-    }
-    
-    // Очищаем видео элемент
     if (videoRef.current) {
       videoRef.current.srcObject = null;
-      videoRef.current.load(); // Сбрасываем состояние видео элемента
     }
     
-    // Сбрасываем состояние и refs
+    setHasVideoStream(false); // Показываем placeholder снова
+    setShowVideo(true);
     setIsStreaming(false);
     isStreamingRef.current = false;
-    setHasVideoStream(false); // Показываем placeholder снова
-    setShowVideo(true); // Показываем видео снова при закрытии сессии
     setStreamingSession(null);
     setStreamingToken(null);
+    setStreamingAvatarId(null);
     streamingSessionRef.current = null;
     streamingTokenRef.current = null;
+    streamingAvatarIdRef.current = null;
     setStatus('не подключено');
-    console.log('Streaming сессия закрыта');
+    console.log('Сессия закрыта');
   }, []);
 
   // Получение текста для видео через backend (подготовка, без запуска сессии)
@@ -372,7 +263,7 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     }
 
     try {
-      const backendResponse = await fetch(`${API_BASE_URL}/heygen/generate/`, {
+      const backendResponse = await fetch(`${API_BASE_URL}/heygen/prepare-text/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -409,59 +300,41 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     }
   }, [answer, userQuery, hasCoordinates, resultsCount]);
 
-  // Запуск streaming сессии (как в heygen_test - только создание сессии и подключение, без озвучивания)
+  // Запуск streaming сессии (точно как в heygen_test)
   const startSession = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
       setStatus('подключение...');
       
-      // Получаем токен
-      console.log('Получение access token...');
       const token = await getStreamingToken();
       setStreamingToken(token);
       streamingTokenRef.current = token;
-      console.log('Access token получен');
       
-      // Создаем сессию
-      console.log('Создание streaming сессии...');
-      setStatus('Создание сессии...');
       const session = await createStreamingSession(token);
       setStreamingSession(session);
       streamingSessionRef.current = session;
-      console.log('Сессия создана:', session.session_id);
       
-      // Настраиваем WebRTC
-      console.log('Настройка WebRTC соединения...');
-      setStatus('Установка соединения...');
       const peerConnection = await startWebRTC(session, token);
       peerConnectionRef.current = peerConnection;
-      console.log('WebRTC подключено');
       
       setIsStreaming(true);
       isStreamingRef.current = true;
       setStatus('подключено');
       setIsLoading(false);
     } catch (err) {
-      console.error('Ошибка запуска сессии:', err);
-      const errorMessage = err.message || 'Ошибка запуска сессии';
-      setError(errorMessage);
-      setIsLoading(false);
+      console.error('Ошибка:', err);
+      setError(err.message);
       setStatus('ошибка');
-      
-      // Останавливаем streaming при ошибке
-      try {
-        await stopStreaming();
-      } catch (stopErr) {
-        console.error('Ошибка при остановке streaming:', stopErr);
-      }
+      setIsLoading(false);
     }
-  }, [getStreamingToken, createStreamingSession, startWebRTC, stopStreaming]);
+  }, [getStreamingToken, createStreamingSession, startWebRTC]);
 
-  // Озвучивание текста (как в heygen_test - отдельная функция)
+  // Озвучивание текста (точно как в heygen_test)
   const handleSpeak = useCallback(async () => {
-    if (!isStreaming) {
-      setError('Сессия не запущена');
+    // Проверяем, что сессия запущена (как в heygen_test)
+    if (!isStreamingRef.current || !streamingSessionRef.current || !streamingTokenRef.current) {
+      setError('Сначала запустите сессию');
       return;
     }
 
@@ -476,40 +349,25 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     }
 
     if (!textToSpeak || !textToSpeak.trim()) {
-      setError('Текст для озвучивания пуст');
+      setError('Введите текст для озвучки');
       return;
     }
 
     try {
       setIsLoading(true);
       setError(null);
-      setStatus('Озвучивание текста...');
       
       const currentSession = streamingSessionRef.current;
       const currentToken = streamingTokenRef.current;
       
-      if (!currentSession || !currentToken) {
-        throw new Error('Сессия не активна');
-      }
-      
-      // Небольшая задержка перед отправкой текста
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Отправляем текст для озвучивания
-      console.log('Отправка текста для озвучивания...');
       await speakText(textToSpeak, currentSession, currentToken);
-      console.log('Текст отправлен, аватар говорит...');
-      
-      setStatus('Готово! Аватар говорит...');
       setIsLoading(false);
     } catch (err) {
-      console.error('Ошибка озвучивания:', err);
-      const errorMessage = err.message || 'Ошибка озвучивания';
-      setError(errorMessage);
-      setStatus('ошибка озвучивания');
+      console.error('Ошибка:', err);
+      setError(err.message);
       setIsLoading(false);
     }
-  }, [isStreaming, videoText, prepareVideoText, speakText]);
+  }, [videoText, prepareVideoText, speakText]);
 
   // Обновленный stopStreaming с обновлением состояния кнопок
   const handleStopSession = useCallback(async () => {
@@ -544,16 +402,15 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     setShowVideo(prev => !prev);
   }, []);
 
-  // Подготовка текста при изменении answer (но не запуск сессии)
+  // Подготовка текста при изменении answer (без автоматического запуска сессии)
   useEffect(() => {
     if (answer) {
+      // Подготавливаем текст, но не запускаем сессию автоматически
       prepareVideoText();
     } else {
       // Сбрасываем состояние, если ответа нет
-      setVideoUrl(null);
       setError(null);
       setSkipVideo(false);
-      setVideoId(null);
       setStatus(null);
       setVideoText(null);
       setHasVideoStream(false); // Сбрасываем состояние видеопотока
@@ -563,22 +420,12 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
       if (isStreamingRef.current) {
         stopStreaming();
       }
-      
-      // Останавливаем polling при сбросе
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-      }
     }
     
-    // Cleanup: останавливаем streaming и polling при размонтировании
+    // Cleanup: останавливаем streaming при размонтировании
     return () => {
       if (isStreamingRef.current) {
         stopStreaming();
-      }
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
       }
     };
   }, [answer, prepareVideoText, stopStreaming]);
@@ -601,8 +448,8 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
   const canStartSession = answer && !isStreaming && !isLoading && !skipVideo;
   // Можно ли закрыть сессию (есть активная сессия)
   const canStopSession = isStreaming;
-  // Можно ли озвучить (есть активная сессия и есть текст)
-  const canSpeak = isStreaming && videoText && !isLoading;
+  // Можно ли озвучить (сессия запущена и есть ответ для подготовки текста) - как в heygen_test
+  const canSpeak = isStreaming && answer && !isLoading && !skipVideo;
   // Можно ли перезапустить сессию (есть ошибка и есть ответ для работы)
   const canRestartSession = error && answer && !skipVideo && !isLoading;
 
@@ -660,6 +507,7 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
               className="btn-secondary" 
               onClick={handleSpeak}
               disabled={!canSpeak}
+              title={!isStreaming ? "Сначала запустите сессию" : "Озвучит текст"}
             >
               🗣 Озвучить
             </button>

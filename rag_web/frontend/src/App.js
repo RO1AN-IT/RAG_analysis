@@ -152,7 +152,8 @@ function App() {
                     flex: answer ? `0 0 ${videoPanelSize}%` : '1 1 100%',
                     minHeight: answer ? '30%' : '0',
                     maxHeight: answer ? '70%' : '100%',
-                    overflow: 'hidden',
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
                     display: 'flex',
                     flexDirection: 'column'
                   }}

@@ -76,7 +76,18 @@
   flex-grow: 1;
 }
 
-.video-panel,
+.video-panel {
+  overflow-y: auto;
+  overflow-x: hidden;
+  width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex-shrink: 0;
+  position: relative;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
 .results-panel {
   overflow: hidden;
   width: 100% !important;

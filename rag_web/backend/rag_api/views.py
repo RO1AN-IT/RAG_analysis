@@ -247,11 +247,11 @@ def should_generate_video(answer: str) -> bool:
 
 
 @method_decorator(csrf_exempt, name='dispatch') 
-class HeyGenView(View):
-    """API endpoint для генерации видео через HeyGen."""
+class HeyGenPrepareTextView(View):
+    """API endpoint для подготовки текста для streaming аватара через GigaChat."""
     
     def post(self, request):
-        """Генерация видео через HeyGen API."""
+        """Подготовка текста для streaming аватара."""
         try:
             data = json.loads(request.body)
             full_answer = data.get('answer', '').strip()
@@ -272,7 +272,7 @@ class HeyGenView(View):
                 }, status=200)
             
             # Генерируем текст для видео через GigaChat
-            logger.info("Генерация текста для видео-аватара")
+            logger.info("Генерация текста для streaming аватара")
             video_text = prepare_video_text(full_answer, has_coordinates, user_query)
             
             # HeyGen API имеет ограничение на длину текста (обычно ~2000-2500 символов)
@@ -298,139 +298,11 @@ class HeyGenView(View):
                     video_text = truncated + " [текст обрезан из-за ограничений API]"
                 logger.info(f"Текст обрезан до {len(video_text)} символов")
             
-            # Получаем API ключ из переменных окружения (как в heygen_test)
-            heygen_api_key = os.environ.get('HEYGEN_API_KEY', 'sk_V2_hgu_k1upmcGvBz3_QufVJuSjUjtPgAwTNhCwSKRGTzWqy9Hk')
-            heygen_avatar_id = os.environ.get('HEYGEN_AVATAR_ID', 'nik_blue_expressive_20240910')
-            heygen_voice_id = os.environ.get('HEYGEN_VOICE_ID', '453c20e1525a429080e2ad9e4b26f2cd')
-            heygen_generate_url = os.environ.get('HEYGEN_GENERATE_URL', 'https://api.heygen.com/v2/video/generate')
-            
-            # Логируем частично API ключ для отладки (первые и последние символы)
-            if heygen_api_key:
-                api_key_preview = f"{heygen_api_key[:10]}...{heygen_api_key[-10:]}" if len(heygen_api_key) > 20 else "***"
-                logger.info(f"HeyGen API ключ: {api_key_preview} (длина: {len(heygen_api_key)})")
-            else:
-                logger.warning("HeyGen API ключ не найден в переменных окружения")
-            
-            if not heygen_api_key:
-                logger.warning("HeyGen API ключ не настроен")
-                return JsonResponse({
-                    'error': 'HEYGEN_API_KEY не задан. Установите переменную окружения.'
-                }, status=500)
-            
-            if not heygen_avatar_id:
-                return JsonResponse({
-                    'error': 'avatar_id обязателен. Укажите ID аватара из кабинета HeyGen.'
-                }, status=400)
-            
-            if not heygen_voice_id:
-                return JsonResponse({
-                    'error': 'voice_id обязателен. Укажите ID голоса из кабинета HeyGen.'
-                }, status=400)
-            
-            logger.info(f"Генерация HeyGen видео для текста длиной {len(video_text)} символов")
-            
-            # Структура запроса как в heygen_test
-            # Docs: https://docs.heygen.com/reference/generate-video
-            payload = {
-                "video_inputs": [
-                    {
-                        "character": {
-                            "type": "avatar",
-                            "avatar_id": heygen_avatar_id,
-                        },
-                        "voice": {
-                            "type": "text",
-                            "input_text": video_text,
-                            "voice_id": heygen_voice_id,
-                        },
-                    }
-                ],
-                # Use lower resolution to work with basic plans
-                "dimension": {
-                    "width": 640,
-                    "height": 360,
-                },
-            }
-            
-            # Логируем структуру запроса для отладки (без текста видео)
-            debug_payload = json.loads(json.dumps(payload))
-            if 'video_inputs' in debug_payload and len(debug_payload['video_inputs']) > 0:
-                debug_payload['video_inputs'][0]['voice']['input_text'] = f"[текст длиной {len(video_text)} символов]"
-            logger.info(f"HeyGen API запрос: url={heygen_generate_url}")
-            logger.info(f"HeyGen API payload: {json.dumps(debug_payload, ensure_ascii=False, indent=2)}")
-            
-            # Вызываем HeyGen API
-            try:
-                # Логируем заголовки (без API ключа для безопасности)
-                logger.info(f"Отправка запроса к HeyGen API: {heygen_generate_url}")
-                logger.info(f"Заголовки: X-Api-Key={'*' * 20}..., Content-Type=application/json")
-                
-                response = requests.post(
-                    heygen_generate_url,
-                    headers={
-                        "X-Api-Key": heygen_api_key,
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                    },
-                    json=payload,
-                    timeout=60,  # generation can be slow; allow more time
-                )
-                
-                logger.info(f"HeyGen generate response: status={response.status_code}")
-                
-                # Если 401, логируем больше информации
-                if response.status_code == 401:
-                    logger.error(f"401 Unauthorized - проверьте API ключ. URL: {heygen_generate_url}")
-                    logger.error(f"API ключ начинается с: {heygen_api_key[:15]}...")
-                    logger.error(f"Полный ответ: {response.text}")
-                
-                if response.status_code >= 300:
-                    try:
-                        details = response.json()
-                    except:
-                        details = {"text": response.text}
-                    logger.error(
-                        "HeyGen generate error: status=%s details=%s", response.status_code, details
-                    )
-                    return JsonResponse(
-                        {
-                            "error": "HeyGen вернул ошибку",
-                            "status_code": response.status_code,
-                            "details": details,
-                        },
-                        status=502,
-                    )
-                
-                try:
-                    api_data = response.json()
-                except ValueError:
-                    api_data = {"text": response.text}
-                
-                logger.info(f"HeyGen generate success data: {api_data}")
-                
-                # v2 API returns {"data": {"video_id": "..."}}
-                inner = api_data.get("data") or api_data
-                video_id = inner.get("video_id") or inner.get("task_id") or inner.get("id")
-                
-                if not video_id:
-                    return JsonResponse(
-                        {"error": "Не удалось получить video_id из ответа HeyGen", "details": api_data},
-                        status=502,
-                    )
-                
-                # Возвращаем video_id и video_text для streaming режима
-                return JsonResponse({
-                    'video_id': video_id,
-                    'status': 'processing',
-                    'message': 'Видео создается. Используйте video_id для проверки статуса.',
-                    'video_text': video_text  # Добавляем текст для streaming режима
-                })
-                    
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Ошибка запроса к HeyGen API: {e}")
-                return JsonResponse({
-                    'error': f'Ошибка соединения с HeyGen API: {str(e)}'
-                }, status=500)
+            # Возвращаем подготовленный текст для streaming
+            return JsonResponse({
+                'video_text': video_text,
+                'skip_video': False
+            }, status=200)
                 
         except json.JSONDecodeError:
             return JsonResponse({
@@ -548,5 +420,21 @@ class HeyGenStreamingTokenView(View):
             return JsonResponse({"error": "HeyGen error", "details": data}, status=502)
 
         logger.info("HeyGen streaming token получен успешно")
+        
+        # Добавляем avatar_id в ответ для использования на frontend
+        # Получаем avatar_id из переменных окружения (без дефолтного значения, чтобы избежать использования несуществующего аватара)
+        heygen_avatar_id = os.environ.get('HEYGEN_AVATAR_ID')
+        if not heygen_avatar_id:
+            logger.warning("HEYGEN_AVATAR_ID не задан в переменных окружения. Используйте доступный Interactive Avatar ID из https://labs.heygen.com/interactive-avatar")
+            # Не используем дефолтное значение, так как старый аватар больше не доступен
+            heygen_avatar_id = None
+        
+        # Если ответ содержит data, добавляем туда, иначе создаем новую структуру
+        if isinstance(data, dict):
+            if 'data' in data:
+                data['data']['avatar_id'] = heygen_avatar_id
+            else:
+                data['avatar_id'] = heygen_avatar_id
+        
         return JsonResponse(data)
 
