@@ -144,9 +144,7 @@ def _rag_query_with_progress(rag_system, user_query, progress_storage, top_k=20)
             
             # Прогресс проверки каждого признака
             check_progress = 45 + int((idx + 1) / len(search_results) * 15)
-            # Обновляем прогресс только для каждого 5-го признака, чтобы уменьшить нагрузку
-            if (idx + 1) % 5 == 0 or idx == len(search_results) - 1:
-                _send_progress_event(progress_storage, 3, check_progress, f"Проверка признака {idx + 1}/{len(search_results)}: {feature_name[:30]}...")
+            _send_progress_event(progress_storage, 3, check_progress, f"Проверка признака {idx + 1}/{len(search_results)}: {feature_name[:30]}...")
             
             if rag_system.check_feature_match(user_query, feature_name, feature_desc):
                 matched_features.append({
@@ -266,8 +264,6 @@ class QueryView(View):
                     _progress_storage[request_id]['progress'] = 100
                     _progress_storage[request_id]['step'] = 6
                     _progress_storage[request_id]['message'] = 'Запрос выполнен успешно'
-                    _progress_storage[request_id]['completed_at'] = time.time()  # Время завершения для отслеживания
-                    logger.info(f"Запрос {request_id} успешно завершен, результат сохранен")
                     
                 except Exception as e:
                     logger.error(f"Ошибка выполнения запроса: {e}", exc_info=True)
@@ -310,18 +306,16 @@ class QueryProgressView(View):
         
         progress_data = _progress_storage[request_id].copy()
         
-        # Если запрос завершен, не удаляем сразу - даем время фронтенду получить результат
+        # Если запрос завершен, удаляем его из хранилища через некоторое время
         if progress_data['status'] in ['completed', 'error']:
-            # Удаляем через 5 минут после завершения (увеличено для надежности)
-            if 'cleanup_scheduled' not in progress_data:
-                progress_data['cleanup_scheduled'] = True
-                def cleanup():
-                    time.sleep(300)  # 5 минут
-                    if request_id in _progress_storage:
-                        logger.info(f"Удаление завершенного запроса {request_id} из хранилища")
-                        del _progress_storage[request_id]
-                cleanup_thread = threading.Thread(target=cleanup, daemon=True)
-                cleanup_thread.start()
+            # Удаляем через 30 секунд после завершения
+            import threading
+            def cleanup():
+                import time
+                time.sleep(30)
+                if request_id in _progress_storage:
+                    del _progress_storage[request_id]
+            threading.Thread(target=cleanup, daemon=True).start()
         
         return JsonResponse(progress_data)
 

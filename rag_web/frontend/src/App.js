@@ -101,8 +101,6 @@ function App() {
 
     let requestId = null;
     let progressInterval = null;
-    let currentTimeout = null;
-    let isPollingActive = true;
 
     try {
       // Отправляем запрос
@@ -125,62 +123,17 @@ function App() {
         throw new Error('Не получен request_id от сервера');
       }
 
-      // Начинаем polling прогресса с улучшенной обработкой ошибок
-      let consecutiveErrors = 0;
-      const maxConsecutiveErrors = 10; // Максимум 10 ошибок подряд
-      const maxRequestTime = 10 * 60 * 1000; // Максимум 10 минут на запрос
-      const startTime = Date.now();
-      let pollInterval = 500; // Начальный интервал polling
-      isPollingActive = true;
-      currentTimeout = null;
-      
-      const pollProgress = async () => {
-        if (!isPollingActive) return;
-        currentTimeout = null; // Сбрасываем ссылку на timeout
-        
-        // Проверка таймаута запроса
-        if (Date.now() - startTime > maxRequestTime) {
-          isPollingActive = false;
-          setIsLoading(false);
-          setAnswer('Ошибка: Превышено время ожидания ответа от сервера. Попробуйте повторить запрос.');
-          setProgressMessage('Ошибка: Превышено время ожидания');
-          console.error('Таймаут запроса');
-          return;
-        }
-        
+      // Начинаем polling прогресса
+      progressInterval = setInterval(async () => {
         try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // Таймаут 10 секунд на запрос
-          
-          const progressResponse = await fetch(`${API_BASE_URL}/query/progress/?request_id=${requestId}`, {
-            signal: controller.signal
-          });
-          
-          clearTimeout(timeoutId);
+          const progressResponse = await fetch(`${API_BASE_URL}/query/progress/?request_id=${requestId}`);
           
           if (!progressResponse.ok) {
-            consecutiveErrors++;
-            console.error(`Ошибка получения прогресса (${consecutiveErrors}/${maxConsecutiveErrors}):`, progressResponse.status);
-            
-            if (consecutiveErrors >= maxConsecutiveErrors) {
-              isPollingActive = false;
-              setIsLoading(false);
-              setAnswer('Ошибка: Потеряно соединение с сервером. Попробуйте повторить запрос.');
-              setProgressMessage('Ошибка: Потеряно соединение с сервером');
-              return;
-            }
-            
-            // Увеличиваем интервал при ошибках
-            pollInterval = Math.min(pollInterval * 1.5, 5000);
-            currentTimeout = setTimeout(pollProgress, pollInterval);
+            console.error('Ошибка получения прогресса:', progressResponse.status);
             return;
           }
 
           const progressData = await progressResponse.json();
-          
-          // Сбрасываем счетчик ошибок при успешном запросе
-          consecutiveErrors = 0;
-          pollInterval = 500; // Возвращаем нормальный интервал
 
           // Обновляем прогресс
           if (progressData.progress !== undefined) {
@@ -198,7 +151,7 @@ function App() {
 
           // Если запрос завершен
           if (progressData.status === 'completed' && progressData.result) {
-            isPollingActive = false;
+            clearInterval(progressInterval);
             // Сохраняем результаты в состояние (автоматически сохранится в localStorage через хук)
             setAnswer(progressData.result.answer || '');
             setCoordinates(progressData.result.coordinates || []);
@@ -208,69 +161,25 @@ function App() {
             setProgressStep(6);
             setProgressMessage('Запрос выполнен успешно');
             setIsLoading(false);
-          } else if (progressData.status === 'completed' && !progressData.result) {
-            // Запрос завершен, но результат еще не готов - ждем еще немного
-            // Используем короткий интервал для быстрого получения результата
-            pollInterval = 500; // Короткий интервал для получения результата
-            console.log(`Запрос завершен, ожидаем результат... (интервал: ${pollInterval}ms)`);
-            
-            // Ограничиваем время ожидания результата (максимум 30 секунд)
-            const resultWaitTime = 30 * 1000;
-            if (Date.now() - startTime > resultWaitTime) {
-              isPollingActive = false;
-              setIsLoading(false);
-              setAnswer('Ошибка: Результат запроса не получен в течение ожидаемого времени. Попробуйте повторить запрос.');
-              setProgressMessage('Ошибка: Результат не получен');
-              return;
-            }
-            
-            currentTimeout = setTimeout(pollProgress, pollInterval);
           } else if (progressData.status === 'error') {
-            isPollingActive = false;
+            clearInterval(progressInterval);
             setAnswer(`Ошибка: ${progressData.error || 'Неизвестная ошибка'}`);
             setProgressMessage(`Ошибка: ${progressData.error || 'Неизвестная ошибка'}`);
             setIsLoading(false);
-          } else {
-            // Продолжаем polling
-            currentTimeout = setTimeout(pollProgress, pollInterval);
           }
         } catch (pollError) {
-          consecutiveErrors++;
-          console.error(`Ошибка при получении прогресса (${consecutiveErrors}/${maxConsecutiveErrors}):`, pollError);
-          
-          if (pollError.name === 'AbortError') {
-            console.error('Таймаут запроса прогресса');
-          }
-          
-          if (consecutiveErrors >= maxConsecutiveErrors) {
-            isPollingActive = false;
-            setIsLoading(false);
-            setAnswer('Ошибка: Потеряно соединение с сервером. Попробуйте повторить запрос.');
-            setProgressMessage('Ошибка: Потеряно соединение с сервером');
-            return;
-          }
-          
-          // Увеличиваем интервал при ошибках
-          pollInterval = Math.min(pollInterval * 1.5, 5000);
-          currentTimeout = setTimeout(pollProgress, pollInterval);
+          console.error('Ошибка при получении прогресса:', pollError);
         }
-      };
-      
-      // Начинаем polling
-      progressInterval = setTimeout(pollProgress, pollInterval);
-      currentTimeout = progressInterval;
+      }, 500); // Polling каждые 500ms
 
     } catch (error) {
       console.error('Ошибка при обработке запроса:', error);
       if (progressInterval) {
-        clearTimeout(progressInterval);
+        clearInterval(progressInterval);
       }
-      if (currentTimeout) {
-        clearTimeout(currentTimeout);
-      }
-      setIsLoading(false);
       setAnswer(`Ошибка: ${error.message}`);
       setProgressMessage(`Ошибка: ${error.message}`);
+      setIsLoading(false);
     }
   };
 

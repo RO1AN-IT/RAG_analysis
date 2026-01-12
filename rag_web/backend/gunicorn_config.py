@@ -28,10 +28,6 @@ loglevel = "info"
 preload_app = True
 
 # Максимальное количество запросов на воркер перед перезапуском (для предотвращения утечек памяти)
-# Увеличено для уменьшения частоты перезапусков
-max_requests = 5000
-max_requests_jitter = 200
-
-# Graceful timeout для корректного завершения запросов
-graceful_timeout = 30
+max_requests = 1000
+max_requests_jitter = 50
 
