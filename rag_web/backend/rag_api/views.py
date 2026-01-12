@@ -482,7 +482,7 @@ def prepare_video_text(full_answer: str, has_coordinates: bool = False, user_que
             credentials=GIGACHAT_CREDENTIALS,
             verify_ssl_certs=False,
             scope='GIGACHAT_API_B2B',
-            model='GigaChat-2-Pro'
+            model='GigaChat-2-Lite'
         ) as giga:
             response = giga.chat(video_prompt)
             video_text = response.choices[0].message.content.strip()

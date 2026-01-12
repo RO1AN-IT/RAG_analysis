@@ -309,7 +309,7 @@ class RAGSystemLangChain:
                 credentials=self.credentials,
                 verify_ssl_certs=False,
                 scope='GIGACHAT_API_B2B',
-                model='GigaChat-2-Pro'
+                model='GigaChat-2-Lite'
             ) as giga:
                 response = giga.chat(prompt)
                 description = response.choices[0].message.content.strip()
@@ -492,7 +492,7 @@ class RAGSystemLangChain:
                     credentials=self.credentials,
                     verify_ssl_certs=False,
                     scope='GIGACHAT_API_B2B',
-                    model='GigaChat-2-Pro',
+                    model='GigaChat-2-Lite',
                     timeout=120,  # Увеличенный timeout для SSL handshake
                     retry_on_timeout=True
                 ) as giga:
@@ -617,7 +617,7 @@ class RAGSystemLangChain:
                     credentials=self.credentials,
                     verify_ssl_certs=False,
                     scope='GIGACHAT_API_B2B',
-                    model='GigaChat-2-Pro'
+                    model='GigaChat-2-Lite'
                 ) as giga:
                     response = giga.chat(prompt)
                     sql_query = response.choices[0].message.content.strip()
@@ -828,7 +828,7 @@ class RAGSystemLangChain:
                 credentials=self.credentials,
                 verify_ssl_certs=False,
                 scope='GIGACHAT_API_B2B',
-                model='GigaChat-2-Pro'
+                model='GigaChat-2-Lite'
             ) as giga:
                 response = giga.chat(prompt)
                 summary = response.choices[0].message.content.strip()
