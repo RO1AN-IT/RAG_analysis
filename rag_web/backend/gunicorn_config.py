@@ -29,6 +29,7 @@ loglevel = "info"
 preload_app = True
 
 # Максимальное количество запросов на воркер перед перезапуском (для предотвращения утечек памяти)
-max_requests = 1000
-max_requests_jitter = 50
+# Увеличено для учета частых запросов прогресса (polling каждую секунду)
+max_requests = 5000
+max_requests_jitter = 200
 

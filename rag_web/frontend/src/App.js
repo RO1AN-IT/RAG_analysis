@@ -170,7 +170,7 @@ function App() {
         } catch (pollError) {
           console.error('Ошибка при получении прогресса:', pollError);
         }
-      }, 500); // Polling каждые 500ms
+      }, 1000); // Polling каждые 1000ms (1 секунда) - уменьшаем нагрузку на сервер
 
     } catch (error) {
       console.error('Ошибка при обработке запроса:', error);
