@@ -11,6 +11,7 @@ ENV/
 dist/
 build/
 *.egg
+/Users/rodionduktanov/anaconda_projects/RAG_Caspian_Analysis/compare_databases.py
 
 # Django
 *.log

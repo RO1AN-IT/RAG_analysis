@@ -174,6 +174,79 @@ curl http://localhost/
 docker compose logs | grep -i error
 ```
 
+## Проверка настроек OpenSearch
+
+Чтобы узнать, к какому OpenSearch обращается сервер, используйте один из следующих способов:
+
+### Способ 1: Проверка переменных окружения в контейнере
+
+```bash
+# Посмотреть все переменные окружения, связанные с OpenSearch
+docker compose exec backend env | grep OPENSEARCH
+
+# Или более детально:
+docker compose exec backend printenv | grep OPENSEARCH
+```
+
+Это покажет:
+- `OPENSEARCH_HOST` - адрес сервера OpenSearch
+- `OPENSEARCH_PORT` - порт (обычно 9200)
+- `OPENSEARCH_USE_SSL` - используется ли SSL
+- `OPENSEARCH_VERIFY_CERTS` - проверка сертификатов
+- `OPENSEARCH_AUTH_USERNAME` - имя пользователя (если есть)
+- `OPENSEARCH_AUTH_PASSWORD` - пароль (если есть)
+
+### Способ 2: Проверка файла .env на сервере
+
+```bash
+# Посмотреть настройки OpenSearch в файле .env
+cat rag_web/backend/.env | grep OPENSEARCH
+
+# Или с номерами строк:
+grep -n OPENSEARCH rag_web/backend/.env
+```
+
+### Способ 3: Проверка логов при запуске
+
+```bash
+# Посмотреть логи backend при запуске (там выводится информация о подключении к OpenSearch)
+docker compose logs backend | grep -i opensearch
+
+# Или последние логи:
+docker compose logs --tail=100 backend | grep -i opensearch
+```
+
+В логах вы увидите строку вида:
+```
+Подключение к OpenSearch: localhost:9200 (SSL: False)
+```
+
+### Способ 4: Проверка через Python в контейнере
+
+```bash
+# Зайти в контейнер
+docker compose exec backend bash
+
+# В контейнере выполнить:
+python -c "import os; print('Host:', os.environ.get('OPENSEARCH_HOST', 'не задан')); print('Port:', os.environ.get('OPENSEARCH_PORT', 'не задан')); print('SSL:', os.environ.get('OPENSEARCH_USE_SSL', 'не задан'))"
+```
+
+### Способ 5: Проверка активного подключения
+
+```bash
+# Проверить, доступен ли OpenSearch по указанному адресу
+docker compose exec backend curl -s http://localhost:9200 || echo "OpenSearch недоступен"
+
+# Или если OpenSearch на другом сервере:
+docker compose exec backend sh -c 'curl -s http://$OPENSEARCH_HOST:$OPENSEARCH_PORT || echo "OpenSearch недоступен"'
+```
+
+### Быстрая проверка всех настроек одной командой
+
+```bash
+docker compose exec backend sh -c 'echo "OpenSearch Host: $OPENSEARCH_HOST"; echo "OpenSearch Port: $OPENSEARCH_PORT"; echo "Use SSL: $OPENSEARCH_USE_SSL"; echo "Verify Certs: $OPENSEARCH_VERIFY_CERTS"; echo "Auth Username: ${OPENSEARCH_AUTH_USERNAME:-не задан}"'
+```
+
 ## Файловая структура
 
 ```

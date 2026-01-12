@@ -63,7 +63,7 @@ def get_rag_system():
             opensearch_use_ssl=opensearch_use_ssl,
             opensearch_verify_certs=opensearch_verify_certs,
             opensearch_auth=opensearch_auth,
-            opensearch_index_descriptions="rag_descriptions",
+            opensearch_index_descriptions="feature_descriptions",
             opensearch_index_layers="rag_layers",
             credentials=GIGACHAT_CREDENTIALS
         )

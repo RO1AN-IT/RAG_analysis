@@ -20,7 +20,7 @@ OPENSEARCH_USERNAME = os.environ.get('OPENSEARCH_USERNAME', 'admin')
 OPENSEARCH_PASSWORD = os.environ.get('OPENSEARCH_PASSWORD', 'Rodion1killer')
 
 # Индексы для экспорта
-INDICES_TO_EXPORT = ['rag_descriptions', 'rag_layers']
+INDICES_TO_EXPORT = ['feature_descriptions', 'rag_layers']
 
 # Директория для экспорта
 EXPORT_DIR = 'opensearch_export'

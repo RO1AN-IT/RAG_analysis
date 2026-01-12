@@ -15,7 +15,7 @@ from opensearchpy.helpers import bulk
 from typing import List, Dict, Any
 
 # Конфигурация нового OpenSearch
-OPENSEARCH_HOST = os.environ.get('OPENSEARCH_HOST', 'localhost')
+OPENSEARCH_HOST = os.environ.get('OPENSEARCH_HOST', '155.212.186.244')
 OPENSEARCH_PORT = int(os.environ.get('OPENSEARCH_PORT', 9200))
 OPENSEARCH_USE_SSL = os.environ.get('OPENSEARCH_USE_SSL', 'False').lower() == 'true'
 OPENSEARCH_VERIFY_CERTS = os.environ.get('OPENSEARCH_VERIFY_CERTS', 'False').lower() == 'true'
@@ -27,6 +27,35 @@ EXPORT_DIR = 'opensearch_export'
 
 # Размер батча для bulk insert
 BATCH_SIZE = 500
+
+
+def clean_settings_recursive(settings_dict: dict, excluded_keys: set) -> dict:
+    """
+    Рекурсивно очищает настройки от исключенных ключей.
+    
+    Args:
+        settings_dict: Словарь с настройками
+        excluded_keys: Множество ключей для исключения
+        
+    Returns:
+        Очищенный словарь настроек
+    """
+    cleaned = {}
+    for key, value in settings_dict.items():
+        # Пропускаем исключенные ключи
+        if key in excluded_keys:
+            continue
+        
+        # Если значение - словарь, рекурсивно очищаем его
+        if isinstance(value, dict):
+            cleaned_value = clean_settings_recursive(value, excluded_keys)
+            # Добавляем только если словарь не пустой
+            if cleaned_value:
+                cleaned[key] = cleaned_value
+        else:
+            cleaned[key] = value
+    
+    return cleaned
 
 
 def import_index(client: OpenSearch, index_name: str, export_dir: str, overwrite: bool = False) -> bool:
@@ -80,29 +109,94 @@ def import_index(client: OpenSearch, index_name: str, export_dir: str, overwrite
         
         if mapping:
             index_body['mappings'] = mapping
+            
+            # Проверяем, есть ли поле knn_vector в mapping - нужно включить KNN
+            if 'properties' in mapping:
+                has_knn_vector = any(
+                    prop.get('type') == 'knn_vector' 
+                    for prop in mapping['properties'].values()
+                )
+                if has_knn_vector:
+                    print(f"   ⚠️  Обнаружено поле knn_vector - будет включен KNN")
         
         if settings:
             # Settings могут быть вложены в 'index' ключ
             # Очищаем settings от служебных полей, которые нельзя установить при создании
-            clean_settings = {}
+            
+            # Список настроек, которые нужно исключить (служебные или несовместимые)
+            excluded_settings = {
+                'uuid', 'version', 'creation_date', 'provided_name',
+                # KNN настройки, которые могут требовать плагины или не поддерживаться
+                'knn.derived_source',  # Настройка на верхнем уровне index
+                'derived_source',  # Исключаем весь блок derived_source внутри knn
+            }
             
             # Если settings имеет структуру {'index': {...}}, извлекаем внутренние настройки
             if 'index' in settings and isinstance(settings['index'], dict):
                 index_settings = settings['index']
-                for key, value in index_settings.items():
-                    # Пропускаем служебные поля
-                    if key in ['uuid', 'version', 'creation_date', 'provided_name']:
-                        continue
-                    clean_settings[key] = value
+                # Рекурсивно очищаем настройки
+                clean_settings = clean_settings_recursive(index_settings, excluded_settings)
+                
+                # Дополнительно удаляем knn.derived_source (может быть на верхнем уровне как 'knn.derived_source')
+                if 'knn.derived_source' in clean_settings:
+                    del clean_settings['knn.derived_source']
+                    print(f"   ⚠️  Исключена несовместимая настройка: knn.derived_source")
+                
+                # Дополнительно удаляем весь блок knn, если он содержит несовместимые настройки
+                if 'knn' in clean_settings:
+                    knn_settings = clean_settings['knn']
+                    if isinstance(knn_settings, dict):
+                        # Удаляем derived_source из knn, если он есть
+                        if 'derived_source' in knn_settings:
+                            del knn_settings['derived_source']
+                        # Если knn стал пустым, удаляем его полностью
+                        if not knn_settings:
+                            del clean_settings['knn']
+                
+                # Проверяем, нужно ли включить KNN (если есть knn_vector в mapping и не установлено в settings)
+                if mapping and 'properties' in mapping:
+                    has_knn_vector = any(
+                        prop.get('type') == 'knn_vector' 
+                        for prop in mapping['properties'].values()
+                    )
+                    if has_knn_vector and 'knn' not in clean_settings:
+                        # Включаем KNN для индекса (index.knn = true)
+                        clean_settings['knn'] = True
+                        print(f"   ✓ Включена настройка KNN для индекса (index.knn = true)")
+                
                 # Обернем обратно в 'index'
                 if clean_settings:
                     index_body['settings'] = {'index': clean_settings}
             else:
                 # Иначе используем settings как есть, но очищаем служебные поля
-                for key, value in settings.items():
-                    if key in ['uuid', 'version', 'creation_date', 'provided_name']:
-                        continue
-                    clean_settings[key] = value
+                clean_settings = clean_settings_recursive(settings, excluded_settings)
+                
+                # Дополнительно удаляем knn.derived_source (может быть на верхнем уровне как 'knn.derived_source')
+                if 'knn.derived_source' in clean_settings:
+                    del clean_settings['knn.derived_source']
+                    print(f"   ⚠️  Исключена несовместимая настройка: knn.derived_source")
+                
+                # Дополнительно удаляем knn.derived_source, если он есть
+                if 'knn' in clean_settings and isinstance(clean_settings['knn'], dict):
+                    if 'derived_source' in clean_settings['knn']:
+                        del clean_settings['knn']['derived_source']
+                    if not clean_settings['knn']:
+                        del clean_settings['knn']
+                
+                # Проверяем, нужно ли включить KNN (если есть knn_vector в mapping)
+                if mapping and 'properties' in mapping:
+                    has_knn_vector = any(
+                        prop.get('type') == 'knn_vector' 
+                        for prop in mapping['properties'].values()
+                    )
+                    if has_knn_vector:
+                        # Для неструктурированных settings добавляем в корень
+                        if 'index' not in clean_settings:
+                            clean_settings['index'] = {}
+                        if isinstance(clean_settings.get('index'), dict) and 'knn' not in clean_settings['index']:
+                            clean_settings['index']['knn'] = True
+                            print(f"   ✓ Включена настройка KNN для индекса (index.knn = true)")
+                
                 if clean_settings:
                     index_body['settings'] = clean_settings
         
@@ -114,10 +208,16 @@ def import_index(client: OpenSearch, index_name: str, export_dir: str, overwrite
             client.indices.create(index=index_name, **index_body)
         print(f"✓ Индекс создан")
         
+        # Небольшая задержка для стабилизации индекса
+        import time
+        time.sleep(1)
+        
         # Импорт документов через bulk API
         if documents:
             print(f"📦 Импорт документов...")
             actions = []
+            total_imported = 0
+            total_failed = 0
             
             for i, doc in enumerate(documents):
                 action = {
@@ -129,27 +229,105 @@ def import_index(client: OpenSearch, index_name: str, export_dir: str, overwrite
                 
                 # Выполняем bulk insert батчами
                 if len(actions) >= BATCH_SIZE:
-                    success, failed = bulk(client, actions, chunk_size=BATCH_SIZE)
-                    if failed:
-                        print(f"   ⚠️  Ошибок в батче: {len(failed)}")
+                    try:
+                        # Используем refresh='wait_for' для последнего батча, чтобы документы были доступны сразу
+                        is_last_batch = (i + 1 >= total_docs)
+                        refresh_param = 'wait_for' if is_last_batch else False
+                        
+                        result = bulk(
+                            client, 
+                            actions, 
+                            chunk_size=BATCH_SIZE, 
+                            refresh=refresh_param,
+                            request_timeout=120
+                        )
+                        
+                        # bulk возвращает кортеж (success_count, failed_items)
+                        if isinstance(result, tuple) and len(result) >= 2:
+                            success_count, failed_items = result[0], result[1]
+                            total_imported += success_count
+                            if failed_items:
+                                total_failed += len(failed_items)
+                                print(f"   ⚠️  Ошибок в батче: {len(failed_items)}")
+                                # Выводим первые ошибки для отладки
+                                for error_item in failed_items[:3]:
+                                    error_info = error_item.get('index', {}).get('error', {})
+                                    if isinstance(error_info, dict):
+                                        error_msg = error_info.get('reason', str(error_info))
+                                    else:
+                                        error_msg = str(error_info)
+                                    print(f"      Ошибка: {error_msg}")
+                        else:
+                            # Если bulk вернул неожиданный формат, считаем что все успешно
+                            print(f"   ⚠️  Неожиданный формат результата bulk: {type(result)}")
+                            total_imported += len(actions)
+                    except Exception as e:
+                        print(f"   ❌ Ошибка при bulk insert: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        total_failed += len(actions)
+                    
                     actions = []
-                    print(f"   Импортировано: {i+1}/{total_docs}")
+                    print(f"   Импортировано: {i+1}/{total_docs} (успешно: {total_imported}, ошибок: {total_failed})")
             
             # Импорт оставшихся документов
             if actions:
-                success, failed = bulk(client, actions, chunk_size=BATCH_SIZE)
-                if failed:
-                    print(f"   ⚠️  Ошибок в последнем батче: {len(failed)}")
+                try:
+                    # Для последнего батча используем refresh='wait_for'
+                    result = bulk(
+                        client, 
+                        actions, 
+                        chunk_size=BATCH_SIZE, 
+                        refresh='wait_for',
+                        request_timeout=120
+                    )
+                    if isinstance(result, tuple) and len(result) >= 2:
+                        success_count, failed_items = result[0], result[1]
+                        total_imported += success_count
+                        if failed_items:
+                            total_failed += len(failed_items)
+                            print(f"   ⚠️  Ошибок в последнем батче: {len(failed_items)}")
+                            for error_item in failed_items[:3]:
+                                error_info = error_item.get('index', {}).get('error', {})
+                                if isinstance(error_info, dict):
+                                    error_msg = error_info.get('reason', str(error_info))
+                                else:
+                                    error_msg = str(error_info)
+                                print(f"      Ошибка: {error_msg}")
+                    else:
+                        print(f"   ⚠️  Неожиданный формат результата bulk: {type(result)}")
+                        total_imported += len(actions)
+                except Exception as e:
+                    print(f"   ❌ Ошибка при bulk insert последнего батча: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    total_failed += len(actions)
             
-            print(f"✓ Импортировано документов: {total_docs}")
+            # Дополнительный refresh для гарантии (если не использовали wait_for)
+            if total_imported > 0:
+                print(f"🔄 Финальное обновление индекса (refresh)...")
+                try:
+                    client.indices.refresh(index=index_name)
+                    print(f"✓ Индекс обновлен")
+                except Exception as e:
+                    print(f"⚠️  Предупреждение: не удалось обновить индекс: {e}")
+            
+            print(f"✓ Импортировано документов: {total_imported} (ошибок: {total_failed})")
         
         # Проверка количества документов в индексе
-        count_response = client.count(index=index_name)
-        imported_count = count_response['count']
-        print(f"✓ Документов в индексе: {imported_count}")
-        
-        if imported_count != total_docs:
-            print(f"⚠️  Внимание: Импортировано {imported_count}, ожидалось {total_docs}")
+        print(f"🔍 Проверка количества документов в индексе...")
+        try:
+            count_response = client.count(index=index_name)
+            imported_count = count_response['count']
+            print(f"✓ Документов в индексе: {imported_count}")
+            
+            if imported_count != total_docs:
+                print(f"⚠️  Внимание: Импортировано {imported_count}, ожидалось {total_docs}")
+                if imported_count == 0:
+                    print(f"❌ Критическая ошибка: документы не попали в индекс!")
+                    print(f"   Проверьте логи OpenSearch и права доступа к индексу")
+        except Exception as e:
+            print(f"⚠️  Ошибка при проверке количества документов: {e}")
         
         return True
         

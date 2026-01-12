@@ -4,7 +4,7 @@ RAG система через LangChain для поиска геологичес
 Алгоритм:
 1. Получаем запрос пользователя
 2. Генерируем описание признака через GigaChat
-3. Векторизуем и ищем в OpenSearch (rag_descriptions)
+3. Векторизуем и ищем в OpenSearch (feature_descriptions)
 4. Берем топ-k результатов
 5. Проверяем каждый признак через GigaChat
 6. Составляем SQL запрос для найденных признаков
@@ -48,7 +48,7 @@ class RAGSystemLangChain:
         opensearch_use_ssl: bool = True,
         opensearch_verify_certs: bool = False,
         opensearch_auth: Optional[tuple] = None,
-        opensearch_index_descriptions: str = "rag_descriptions",
+        opensearch_index_descriptions: str = "feature_descriptions",
         opensearch_index_layers: str = "rag_layers",
         embedding_model_name: str = "ai-forever/sbert_large_nlu_ru",
         credentials: str = GIGACHAT_CREDENTIALS
@@ -62,7 +62,7 @@ class RAGSystemLangChain:
             opensearch_use_ssl: Использовать SSL
             opensearch_verify_certs: Проверять сертификаты
             opensearch_auth: Учетные данные (username, password)
-            opensearch_index_descriptions: Имя индекса с описаниями признаков (rag_descriptions)
+            opensearch_index_descriptions: Имя индекса с описаниями признаков (feature_descriptions)
             opensearch_index_layers: Имя индекса с геологическими данными (rag_layers)
             embedding_model_name: Название модели для эмбеддингов
             credentials: Учетные данные GigaChat
@@ -335,11 +335,51 @@ class RAGSystemLangChain:
         
         try:
             # Генерируем эмбеддинг для запроса
-            query_embedding = self.embedding_model.encode(query).tolist()
+            import numpy as np
+            query_embedding = self.embedding_model.encode(query)
+            embedding_dim = len(query_embedding)
+            logger.info(f"Сгенерирован эмбеддинг размерности: {embedding_dim}")
+            
+            # Для cosine similarity нормализуем вектор
+            # Проверяем space_type из mapping индекса
+            try:
+                mapping = self.opensearch_client.indices.get_mapping(index=self.opensearch_index_descriptions)
+                index_mapping = mapping.get(self.opensearch_index_descriptions, {}).get('mappings', {}).get('properties', {})
+                vector_props = index_mapping.get(self.vector_field_name, {})
+                method = vector_props.get('method', {})
+                space_type = method.get('space_type', 'l2')
+                
+                if space_type == 'cosinesimil' or space_type == 'cosinesimilarity':
+                    # Нормализуем вектор для cosine similarity
+                    norm = np.linalg.norm(query_embedding)
+                    if norm > 0:
+                        query_embedding = (query_embedding / norm).tolist()
+                        logger.info("Вектор нормализован для cosine similarity")
+                    else:
+                        query_embedding = query_embedding.tolist()
+                else:
+                    query_embedding = query_embedding.tolist()
+            except Exception as norm_error:
+                logger.warning(f"Не удалось проверить space_type, используем вектор как есть: {norm_error}")
+                query_embedding = query_embedding.tolist()
             
             # Формируем KNN запрос для OpenSearch
-            # Правильный формат: KNN внутри query
-            knn_query = {
+            # В OpenSearch 2.x может использоваться формат с knn на верхнем уровне
+            # Пробуем оба формата для совместимости
+            
+            # Формат 1: KNN на верхнем уровне (OpenSearch 2.x)
+            knn_query_v1 = {
+                "size": top_k,
+                "knn": {
+                    self.vector_field_name: {
+                        "vector": query_embedding,
+                        "k": top_k
+                    }
+                }
+            }
+            
+            # Формат 2: KNN внутри query (для совместимости)
+            knn_query_v2 = {
                 "size": top_k,
                 "query": {
                     "knn": {
@@ -351,11 +391,56 @@ class RAGSystemLangChain:
                 }
             }
             
-            # Выполняем поиск
-            response = self.opensearch_client.search(
-                index=self.opensearch_index_descriptions,
-                body=knn_query
-            )
+            # Используем формат 1 по умолчанию (OpenSearch 2.x)
+            # Пробуем формат с knn на верхнем уровне, если не работает - используем формат с query
+            knn_query = knn_query_v1
+            
+            # Выполняем поиск с обработкой ошибок
+            response = None
+            try:
+                # Пробуем формат 1 (OpenSearch 2.x)
+                response = self.opensearch_client.search(
+                    index=self.opensearch_index_descriptions,
+                    body=knn_query
+                )
+            except Exception as e1:
+                logger.warning(f"Формат запроса с knn на верхнем уровне не работает: {e1}")
+                try:
+                    # Пробуем формат 2 (старый формат)
+                    logger.info("Пробуем альтернативный формат запроса (knn внутри query)")
+                    knn_query = knn_query_v2
+                    response = self.opensearch_client.search(
+                        index=self.opensearch_index_descriptions,
+                        body=knn_query
+                    )
+                except Exception as e2:
+                    logger.error(f"Оба формата запроса не работают. Ошибка формат 2: {e2}")
+                    raise e2
+            
+            if not response:
+                logger.error("Не удалось выполнить поиск")
+                return []
+            
+            # Логируем детали ответа для диагностики
+            total_hits = response['hits'].get('total', 0)
+            if isinstance(total_hits, dict):
+                total_count = total_hits.get('value', 0)
+            else:
+                total_count = total_hits
+            
+            max_score = response['hits'].get('max_score', None)
+            hits_count = len(response['hits']['hits'])
+            
+            logger.info(f"Ответ OpenSearch: total={total_count}, max_score={max_score}, hits={hits_count}")
+            
+            if hits_count == 0 and total_count > 0:
+                logger.warning(f"⚠️  OpenSearch вернул total={total_count}, но hits пуст. Возможна проблема с форматом запроса.")
+            elif total_count == 0:
+                logger.warning(f"⚠️  OpenSearch вернул 0 результатов. Проверьте:")
+                logger.warning(f"   - Существует ли индекс '{self.opensearch_index_descriptions}'")
+                logger.warning(f"   - Есть ли документы в индексе")
+                logger.warning(f"   - Правильно ли указано поле векторов: '{self.vector_field_name}'")
+                logger.warning(f"   - Совпадает ли размерность вектора ({embedding_dim}) с размерностью в индексе")
             
             # Преобразуем результаты в Document объекты
             documents = []
@@ -783,7 +868,7 @@ class RAGSystemLangChain:
         
         for doc in search_results:
             # Извлекаем feature_name из метаданных
-            # В индексе rag_descriptions поле feature_name хранится в метаданных
+            # В индексе feature_descriptions поле feature_name хранится в метаданных
             feature_name = doc.metadata.get('feature_name', '')
             
             # Если нет в метаданных, пытаемся извлечь из других полей
@@ -953,7 +1038,7 @@ def main():
     OPENSEARCH_USE_SSL=False  
     OPENSEARCH_VERIFY_CERTS=False
     OPENSEARCH_AUTH = ("admin", "admin")
-    OPENSEARCH_INDEX_DESCRIPTIONS = "rag_descriptions"
+    OPENSEARCH_INDEX_DESCRIPTIONS = "feature_descriptions"
     OPENSEARCH_INDEX_LAYERS = "rag_layers"
     
     # Инициализация RAG системы
