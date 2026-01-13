@@ -28,6 +28,27 @@ from prompts import (
     FINAL_SUMMARY_PROMPT
 )
 GIGACHAT_CREDENTIALS = "MDE5OWUyNTAtNGNhZS03ZDdjLTg2ZmMtZjM5NDE0ZGFhNjUzOmYzMTk3ZWUyLTBlNTYtNDUzNy04ZWViLTUyZWU4ZjAyZGMzZA=="
+# Импорт модуля статистики токенов
+try:
+    import sys
+    import os
+    # Добавляем путь к rag_api для импорта token_stats
+    rag_api_path = os.path.join(os.path.dirname(__file__), 'rag_web', 'backend', 'rag_api')
+    if os.path.exists(rag_api_path):
+        sys.path.insert(0, os.path.dirname(rag_api_path))
+        from rag_api.token_stats import record_from_response, save_stats_to_file
+    else:
+        # Если модуль недоступен, создаем заглушки
+        def record_from_response(model, response):
+            pass
+        def save_stats_to_file():
+            pass
+except ImportError:
+    # Если импорт не удался, создаем заглушки
+    def record_from_response(model, response):
+        pass
+    def save_stats_to_file():
+        pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -309,9 +330,10 @@ class RAGSystemLangChain:
                 credentials=self.credentials,
                 verify_ssl_certs=False,
                 scope='GIGACHAT_API_B2B',
-                model='GigaChat-2-Lite'
+                model='GigaChat:light'
             ) as giga:
                 response = giga.chat(prompt)
+                record_from_response('GigaChat:light', response)
                 description = response.choices[0].message.content.strip()
                 logger.info(f"Сгенерировано описание: {description[:100]}...")
                 return description
@@ -492,11 +514,12 @@ class RAGSystemLangChain:
                     credentials=self.credentials,
                     verify_ssl_certs=False,
                     scope='GIGACHAT_API_B2B',
-                    model='GigaChat-2-Lite',
+                    model='GigaChat:light',
                     timeout=120,  # Увеличенный timeout для SSL handshake
                     retry_on_timeout=True
                 ) as giga:
                     response = giga.chat(prompt)
+                    record_from_response('GigaChat:light', response)
                     answer = response.choices[0].message.content.strip().upper()
                     
                     # Проверяем ответ
@@ -617,9 +640,10 @@ class RAGSystemLangChain:
                     credentials=self.credentials,
                     verify_ssl_certs=False,
                     scope='GIGACHAT_API_B2B',
-                    model='GigaChat-2-Lite'
+                    model='GigaChat:light'
                 ) as giga:
                     response = giga.chat(prompt)
+                    record_from_response('GigaChat:light', response)
                     sql_query = response.choices[0].message.content.strip()
                     
                     # Очистка SQL запроса от markdown форматирования, если есть
@@ -828,9 +852,10 @@ class RAGSystemLangChain:
                 credentials=self.credentials,
                 verify_ssl_certs=False,
                 scope='GIGACHAT_API_B2B',
-                model='GigaChat-2-Lite'
+                model='GigaChat:light'
             ) as giga:
                 response = giga.chat(prompt)
+                record_from_response('GigaChat:light', response)
                 summary = response.choices[0].message.content.strip()
                 
                 # Проверяем, что координаты включены в ответ

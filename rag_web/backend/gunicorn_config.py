@@ -13,9 +13,8 @@ workers = 3
 worker_class = "sync"
 
 # Таймауты
-timeout = 300  # Время ожидания ответа (важно для долгих запросов RAG) - увеличено до 5 минут
+timeout = 120  # Время ожидания ответа (важно для долгих запросов RAG)
 keepalive = 5
-graceful_timeout = 30  # Время для graceful shutdown
 
 # Логирование
 accesslog = "-"  # stdout
@@ -29,7 +28,6 @@ loglevel = "info"
 preload_app = True
 
 # Максимальное количество запросов на воркер перед перезапуском (для предотвращения утечек памяти)
-# Увеличено для учета частых запросов прогресса (polling каждую секунду)
-max_requests = 5000
-max_requests_jitter = 200
+max_requests = 1000
+max_requests_jitter = 50
 

@@ -1,0 +1,15 @@
+{
+  "last_updated": "2026-01-13T13:29:25.563776",
+  "models": {
+    "GigaChat:light": {
+      "price_per_1k": 0.2,
+      "requests": 31,
+      "total_tokens": 40764,
+      "prompt_tokens": 39631,
+      "completion_tokens": 1133,
+      "total_cost": 8.152800000000001,
+      "avg_tokens_per_request": 1314.967741935484,
+      "avg_cost_per_request": 0.2629935483870968
+    }
+  }
+}

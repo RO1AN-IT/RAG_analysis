@@ -87,92 +87,6 @@ function App() {
     }
   }, [answer, handleMouseMove, handleMouseUp]);
 
-  // Восстановление запроса при загрузке страницы, если был активный запрос
-  useEffect(() => {
-    const lastRequestId = localStorage.getItem('last_request_id');
-    if (lastRequestId && isLoading === false && !answer) {
-      // Пытаемся восстановить прогресс последнего запроса
-      const checkProgress = async () => {
-        try {
-          const response = await fetch(`${API_BASE_URL}/query/progress/?request_id=${lastRequestId}`);
-          if (response.ok) {
-            const progressData = await response.json();
-            if (progressData.status === 'processing') {
-              // Запрос все еще обрабатывается, продолжаем отслеживать
-              setIsLoading(true);
-              setProgress(progressData.progress || 0);
-              setProgressStep(progressData.step || 0);
-              setProgressMessage(progressData.message || 'Восстановление соединения...');
-              
-              // Запускаем polling для восстановленного запроса
-              const progressInterval = setInterval(async () => {
-                try {
-                  const progressResponse = await fetch(`${API_BASE_URL}/query/progress/?request_id=${lastRequestId}`);
-                  if (!progressResponse.ok) {
-                    if (progressResponse.status === 404) {
-                      clearInterval(progressInterval);
-                      setIsLoading(false);
-                      setProgressMessage('Запрос не найден на сервере. Пожалуйста, отправьте запрос заново.');
-                      localStorage.removeItem('last_request_id');
-                    }
-                    return;
-                  }
-                  
-                  const progressData = await progressResponse.json();
-                  setProgress(progressData.progress || 0);
-                  setProgressStep(progressData.step || 0);
-                  setProgressMessage(progressData.message || '');
-                  
-                  if (progressData.status === 'completed' && progressData.result) {
-                    clearInterval(progressInterval);
-                    setAnswer(progressData.result.answer || '');
-                    setCoordinates(progressData.result.coordinates || []);
-                    setResultsCount(progressData.result.results_count || 0);
-                    setHasCoordinates(progressData.result.has_coordinates || false);
-                    setProgress(100);
-                    setProgressStep(6);
-                    setProgressMessage('Запрос выполнен успешно');
-                    setIsLoading(false);
-                    localStorage.removeItem('last_request_id');
-                  } else if (progressData.status === 'error') {
-                    clearInterval(progressInterval);
-                    setAnswer(`Ошибка: ${progressData.error || 'Неизвестная ошибка'}`);
-                    setProgressMessage(`Ошибка: ${progressData.error || 'Неизвестная ошибка'}`);
-                    setIsLoading(false);
-                    localStorage.removeItem('last_request_id');
-                  }
-                } catch (error) {
-                  console.error('Ошибка при восстановлении прогресса:', error);
-                }
-              }, 1000);
-              
-              // Очистка при размонтировании
-              return () => clearInterval(progressInterval);
-            } else if (progressData.status === 'completed' && progressData.result) {
-              // Запрос уже завершен, восстанавливаем результаты
-              setAnswer(progressData.result.answer || '');
-              setCoordinates(progressData.result.coordinates || []);
-              setResultsCount(progressData.result.results_count || 0);
-              setHasCoordinates(progressData.result.has_coordinates || false);
-              localStorage.removeItem('last_request_id');
-            } else {
-              // Запрос завершен с ошибкой или не найден
-              localStorage.removeItem('last_request_id');
-            }
-          } else {
-            // Запрос не найден, удаляем из localStorage
-            localStorage.removeItem('last_request_id');
-          }
-        } catch (error) {
-          console.error('Ошибка при восстановлении запроса:', error);
-          localStorage.removeItem('last_request_id');
-        }
-      };
-      
-      checkProgress();
-    }
-  }, []); // Выполняется только при монтировании компонента
-
   const handleQuerySubmit = async (userQuery) => {
     setIsLoading(true);
     setProgress(0);
@@ -209,52 +123,16 @@ function App() {
         throw new Error('Не получен request_id от сервера');
       }
 
-      // Сохраняем request_id в localStorage для возможности восстановления
-      localStorage.setItem('last_request_id', requestId);
-      
       // Начинаем polling прогресса
-      let consecutiveErrors = 0;
-      const maxConsecutiveErrors = 3;
-      
       progressInterval = setInterval(async () => {
         try {
           const progressResponse = await fetch(`${API_BASE_URL}/query/progress/?request_id=${requestId}`);
           
           if (!progressResponse.ok) {
-            consecutiveErrors++;
-            
-            if (progressResponse.status === 404) {
-              // Запрос не найден (возможно, воркер перезапустился)
-              console.warn('Запрос не найден на сервере (возможно, воркер перезапустился)');
-              
-              if (consecutiveErrors >= maxConsecutiveErrors) {
-                clearInterval(progressInterval);
-                setAnswer('Ошибка: соединение с сервером потеряно. Запрос мог быть прерван из-за перезапуска сервера. Пожалуйста, отправьте запрос заново.');
-                setProgressMessage('Ошибка: соединение потеряно');
-                setIsLoading(false);
-                localStorage.removeItem('last_request_id');
-                return;
-              }
-              
-              // Продолжаем попытки, возможно сервер еще обрабатывает запрос
-              return;
-            }
-            
-            if (consecutiveErrors >= maxConsecutiveErrors) {
-              clearInterval(progressInterval);
-              setAnswer(`Ошибка получения прогресса: ${progressResponse.status}`);
-              setProgressMessage(`Ошибка: ${progressResponse.status}`);
-              setIsLoading(false);
-              localStorage.removeItem('last_request_id');
-              return;
-            }
-            
             console.error('Ошибка получения прогресса:', progressResponse.status);
             return;
           }
 
-          // Успешный ответ - сбрасываем счетчик ошибок
-          consecutiveErrors = 0;
           const progressData = await progressResponse.json();
 
           // Обновляем прогресс
@@ -283,27 +161,16 @@ function App() {
             setProgressStep(6);
             setProgressMessage('Запрос выполнен успешно');
             setIsLoading(false);
-            localStorage.removeItem('last_request_id');
           } else if (progressData.status === 'error') {
             clearInterval(progressInterval);
             setAnswer(`Ошибка: ${progressData.error || 'Неизвестная ошибка'}`);
             setProgressMessage(`Ошибка: ${progressData.error || 'Неизвестная ошибка'}`);
             setIsLoading(false);
-            localStorage.removeItem('last_request_id');
           }
         } catch (pollError) {
-          consecutiveErrors++;
           console.error('Ошибка при получении прогресса:', pollError);
-          
-          if (consecutiveErrors >= maxConsecutiveErrors) {
-            clearInterval(progressInterval);
-            setAnswer('Ошибка: не удалось получить прогресс выполнения запроса. Пожалуйста, отправьте запрос заново.');
-            setProgressMessage('Ошибка соединения');
-            setIsLoading(false);
-            localStorage.removeItem('last_request_id');
-          }
         }
-      }, 1000); // Polling каждые 1000ms (1 секунда) - уменьшаем нагрузку на сервер
+      }, 1500); // Polling каждые 1500ms (1.5 секунды)
 
     } catch (error) {
       console.error('Ошибка при обработке запроса:', error);

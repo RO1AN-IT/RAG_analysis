@@ -29,20 +29,20 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
   // Получение streaming токена (точно как в heygen_test)
   const getStreamingToken = useCallback(async () => {
     console.log('Получаем access token...');
-    const response = await fetch(`${API_BASE_URL}/heygen/streaming-token/`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    
-    const data = await response.json();
-    if (!response.ok) {
+      const response = await fetch(`${API_BASE_URL}/heygen/streaming-token/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      const data = await response.json();
+      if (!response.ok) {
       throw new Error(data.error || `Token error: ${response.status}`);
     }
     
     console.log('Access token получен');
-    
+      
     // Сохраняем avatar_id из ответа (если есть)
     const avatarId = data.data?.avatar_id || data.avatar_id;
     if (avatarId) {
@@ -72,24 +72,24 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     
     console.log(`Payload: ${JSON.stringify(payload)}`);
     
-    const response = await fetch(`${HEYGEN_API_BASE}/v1/streaming.new`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-    
-    const data = await response.json();
+      const response = await fetch(`${HEYGEN_API_BASE}/v1/streaming.new`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      
+      const data = await response.json();
     console.log('Session response:', data);
-    
-    if (!response.ok) {
+      
+      if (!response.ok) {
       const errMsg = data.error?.message || data.message || JSON.stringify(data);
       console.error(`Детали ошибки: ${errMsg}`);
       throw new Error(`Session error: ${response.status} - ${errMsg}`);
-    }
-    
+      }
+      
     console.log(`Сессия создана: ${data.data.session_id}`);
     return data.data;
   }, [streamingAvatarId]);
@@ -108,7 +108,7 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
       
       // Set stream to video element (only once) - точно как в heygen_test
       if (event.streams && event.streams[0] && !videoRef.current.srcObject) {
-        videoRef.current.srcObject = event.streams[0];
+          videoRef.current.srcObject = event.streams[0];
         setHasVideoStream(true); // Скрываем placeholder
       }
       
@@ -135,17 +135,17 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     // Обработчик ICE кандидатов (точно как в heygen_test)
     peerConnection.onicecandidate = async (event) => {
       if (event.candidate) {
-        await fetch(`${HEYGEN_API_BASE}/v1/streaming.ice`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            session_id: session.session_id,
-            candidate: event.candidate,
-          }),
-        });
+          await fetch(`${HEYGEN_API_BASE}/v1/streaming.ice`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              session_id: session.session_id,
+              candidate: event.candidate,
+            }),
+          });
       }
     };
 
@@ -155,27 +155,27 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     };
 
     // Set remote SDP - точно как в heygen_test
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(session.sdp));
-    
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(session.sdp));
+      
     // Create answer - точно как в heygen_test
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
 
     // Send answer to server - точно как в heygen_test
-    await fetch(`${HEYGEN_API_BASE}/v1/streaming.start`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        session_id: session.session_id,
-        sdp: answer,
-      }),
-    });
+      await fetch(`${HEYGEN_API_BASE}/v1/streaming.start`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: session.session_id,
+          sdp: answer,
+        }),
+      });
 
-    console.log('WebRTC подключено!');
-    return peerConnection;
+      console.log('WebRTC подключено!');
+      return peerConnection;
   }, []);
 
   // Отправка текста для озвучивания (точно как в heygen_test)
@@ -187,25 +187,25 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     // Для Interactive Avatar voice_id может быть undefined - используется голос по умолчанию аватара
     const voiceId = undefined;
     
-    const response = await fetch(`${HEYGEN_API_BASE}/v1/streaming.task`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        session_id: session.session_id,
-        text: text.trim(),
+      const response = await fetch(`${HEYGEN_API_BASE}/v1/streaming.task`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: session.session_id,
+          text: text.trim(),
         voice_id: voiceId || undefined,
-        task_type: 'repeat',
-      }),
-    });
-    
-    if (!response.ok) {
-      const err = await response.json();
+          task_type: 'repeat',
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
       throw new Error(err.error?.message || `Speak error: ${response.status}`);
-    }
-    
+      }
+      
     console.log('Текст отправлен, аватар говорит...');
   }, []);
 
@@ -218,20 +218,20 @@ function VideoAvatar({ answer = '', userQuery = '', hasCoordinates = false, resu
     
     console.log('Закрываем сессию...');
     
-    try {
-      await fetch(`${HEYGEN_API_BASE}/v1/streaming.stop`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${currentToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          session_id: currentSession.session_id,
-        }),
-      });
-    } catch (e) {
+      try {
+        await fetch(`${HEYGEN_API_BASE}/v1/streaming.stop`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${currentToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            session_id: currentSession.session_id,
+          }),
+        });
+      } catch (e) {
       console.error(e);
-    }
+      }
     
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
